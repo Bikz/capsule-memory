@@ -6,4 +6,8 @@ export const router = createBrowserRouter([
     path: '/',
     Component: lazy(() => import('./pages/HomePage'))
   },
+  {
+    path: '/memory',
+    Component: lazy(() => import('./pages/MemoryPage'))
+  }
 ]);

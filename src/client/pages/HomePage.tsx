@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 import logo from '@/client/assets/modelence.svg';
 
 export default function HomePage() {
@@ -19,15 +21,21 @@ export default function HomePage() {
           </p>
         </div>
 
-        <div className="mt-4">
-          <a 
-            href="https://docs.modelence.com" 
-            target="_blank" 
+        <div className="mt-8 flex flex-col items-center gap-4">
+          <a
+            href="https://docs.modelence.com"
+            target="_blank"
             rel="noopener noreferrer"
             className="text-blue-600 hover:text-blue-800 text-lg font-semibold"
           >
             Docs →
           </a>
+          <Link
+            to="/memory"
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-lg font-semibold text-white shadow-md shadow-slate-400/20 transition hover:bg-slate-800"
+          >
+            Open Capsule Memory
+          </Link>
         </div>
       </div>
     </div>
