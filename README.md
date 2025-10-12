@@ -107,6 +107,10 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 Capsule Memory is ready to drop into your agent stack—wire it up to your orchestrator, seed it with long-term knowledge, and let
 your AI recall the past with confidence.
 
+## Competitive Roadmap
+
+See [docs/memory-roadmap.md](docs/memory-roadmap.md) for the competitive analysis, phased roadmap, and KPI targets that guide Capsule Memory toward best-in-class performance against Mem0 and Supermemory.
+
 ## MCP Bridge (Claude / local agents)
 
 Run `npm run mcp` to expose the Capsule Memory API as an MCP server over stdio. Point your MCP-compatible client (e.g. Claude
