@@ -90,6 +90,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run dev`  | Start the Modelence dev server.     |
 | `npm run build`| Build the production bundle.        |
 | `npm start`    | Launch the compiled server bundle.  |
+| `npm run mcp`  | Start the Capsule Memory MCP bridge.|
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
@@ -100,3 +101,17 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 
 Capsule Memory is ready to drop into your agent stack—wire it up to your orchestrator, seed it with long-term knowledge, and let
 your AI recall the past with confidence.
+
+## MCP Bridge (Claude / local agents)
+
+Run `npm run mcp` to expose the Capsule Memory API as an MCP server over stdio. Point your MCP-compatible client (e.g. Claude
+Desktop) at the resulting manifest and the agent will gain the following tools:
+
+- `capsule-memory.store` – add/pin new memories
+- `capsule-memory.search` – semantic lookup
+- `capsule-memory.list` – list the most recent memories
+- `capsule-memory.pin` – toggle pinned status
+- `capsule-memory.forget` – delete a memory with an optional reason
+
+The bridge proxies requests to the running Modelence server (`http://localhost:3000` by default). Set `CAPSULE_MEMORY_URL` if the
+API is exposed on a different origin. This keeps the web UI untouched while enabling agents to update and query the memory store.
