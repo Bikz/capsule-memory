@@ -1,19 +1,37 @@
 # Capsule Memory Prioritized TODO
 
-## P0 – Hardening & Validation (Immediate)
-- **Backfill & migrations**: script and run backfill to populate `storage`, `graphEnrich`, provenance, and metadata defaults on existing memories; add migration guardrails to avoid double-writing.
-- **Security envelope**: wire CapsuleMeta fields into encryption/BYOK hooks, ensure piiFlags/ACL enforcement on every mutation, and document operational runbooks.
-- **Observability & QA**: add structured logs + metrics for policy/recipe selection, create regression tests for policy evaluation + recipe scoring, and add contract tests for Node SDK additions.
-- **Operational tooling**: expose admin CLI to inspect/update storage policies, surface recipe catalog + applied policies in Studio console.
+## ✅ Completed (Wave 1 foundations delivered)
+- [x] CapsuleMeta v0.1 schema with ACL enforcement, PII encryption, provenance, and SDK exposure.
+- [x] Programmable storage v1: policy engine, graph-enrich routing, backfill tooling, and policy inspector CLI.
+- [x] Search recipe runtime: starter library, recipe-weighted scoring, `/v1/memories/recipes` API, and SDK support.
+- [x] Observability & safeguards: structured policy/recipe logs, hardening of API guards, and migration/backfill scripts.
 
-## P1 – Productization (Next Sprint)
-- **Capsule Router + MCP polish**: ship guided setup with templated recipes/policies; verify sub-5 minute onboarding path.
-- **Studio UX**: interactive editors for recipes/storage policies with preview + validation, plus audit log views of provenance and ACL changes.
-- **Ingestion ecosystem**: deliver Notion & Google Drive connectors with tagging + error dashboards; add ingestion monitor and retry queues.
-- **Capsule Bench**: launch CLI + hosted dashboard for quality/latency evals and shadow benchmarking against Mem0/Supermemory.
+## 🚀 Sprint 1 (Wave 1 parity still outstanding)
+1. **Capsule Router & MCP polish** (roadmap items 5 & Sprint 2 pre-req)
+   - One-command router setup with templated recipes/policies.
+   - Streamlined MCP packaging + docs to guarantee <5 min TTFV.
+2. **Studio UX for policies & recipes** (roadmap item 7)
+   - Editors for search recipes/storage policies with validation + live preview.
+   - Surface provenance/audit trail (incl. policy decisions) in the console.
+3. **Capsule Bench (eval harness)** (roadmap item 10)
+   - CLI `capsule bench` for shadow benchmarking vs Mem0/Supermemory.
+   - Metrics ingest + dashboard wiring for latency/quality tracking.
 
-## P2 – Differentiators (Following Sprint)
-- **Graph enrichment pipeline**: implement async entity extraction, materialize `graph_expand` recipe steps, and expose tuning controls per policy.
-- **Adaptive retrieval**: add query rewriting + learned rerankers with caching strategies, including guardrails for latency budgets.
-- **Latency & scale**: ship pluggable store adapters (pgvector/Qdrant), hotset cache, sharding docs, and p95 SLA reporting.
-- **Local-first**: build Capsule Local desktop service (SQLite + FAISS) with sync + permissioned sharing across MCP clients.
+## 🧭 Sprint 2 (Wave 1 completion & Wave 2 kickoff)
+1. **Connectors: Notion & Google Drive** (roadmap item 6)
+   - OAuth + webhook/polling ingest, tagging, retry queues, ingest monitor.
+2. **Capsule-Graph read-only enrichment** (roadmap item 4)
+   - Async entity/relation extraction pipeline with `graph_expand` recipe step toggle.
+3. **Latency & scalability program groundwork** (roadmap item 9)
+   - Baseline pgvector/Qdrant adapters, hotset caching prototype, SLA dashboards.
+
+## 🌉 Near-Term Wave 2 (post-parity acceleration)
+- **Adaptive retrieval** – query rewriting + learned rerankers with caches (roadmap item 8).
+- **OpenMemory-class local-first** – Capsule Local desktop app + MCP sharing (item 11).
+- **Security & governance** – BYOK rollout, row-level ACLs, write-time PII policy gating (item 12).
+
+## 🛣️ Long-Range (Wave 3 / Moat)
+- **Programmable storage v2** – lifecycle DAGs, summarisation, proof-of-recall (item 13).
+- **Capsule federation** – multi-region brokering & BYO embeddings (item 14).
+- **Connectors as a platform** – GA catalog + OSS connector SDK (item 15).
+- **Vertical solutions & community GTM** – sample apps, migration tooling, pricing (items 16–17).
