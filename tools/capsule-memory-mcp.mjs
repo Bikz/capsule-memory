@@ -6,12 +6,23 @@
  * Exposes the Capsule Memory Modelence module as an MCP tool collection so
  * local agents (e.g. Claude desktop) can store and retrieve memories without
  * touching the existing web UI.
+ *
+ * This implementation keeps the canonical MCP tool schemas as JSON Schema to
+ * match the protocol requirements and uses AJV to validate requests/responses.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import Ajv from 'ajv';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
 
 const BASE_URL =
   process.env.CAPSULE_MEMORY_URL ||
@@ -26,6 +37,19 @@ const DEFAULT_CLIENT_INFO = {
   pixelRatio: 2,
   orientation: 'landscape-primary'
 };
+
+const ajv = new Ajv({
+  allErrors: true,
+  coerceTypes: true,
+  useDefaults: true
+});
+
+function clone(value) {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
 
 function buildUrl(methodName) {
   const trimmed = methodName.startsWith('/')
@@ -96,230 +120,438 @@ function serializeMemory(memory) {
   };
 }
 
-const server = new McpServer({
-  name: 'capsule-memory-mcp',
-  version: '0.1.0'
-});
+const JSON_SCHEMAS = {
+  store: {
+    input: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['content'],
+      properties: {
+        content: { type: 'string', minLength: 1 },
+        pinned: { type: 'boolean' }
+      }
+    },
+    output: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'pinned', 'explanation', 'forgottenMemoryId'],
+      properties: {
+        id: { type: 'string' },
+        pinned: { type: 'boolean' },
+        explanation: { type: 'string' },
+        forgottenMemoryId: { type: ['string', 'null'] }
+      }
+    }
+  },
+  search: {
+    input: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['query'],
+      properties: {
+        query: { type: 'string', minLength: 1 },
+        limit: { type: 'integer', minimum: 1, maximum: 20 }
+      }
+    },
+    output: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['query', 'explanation', 'results'],
+      properties: {
+        query: { type: 'string' },
+        explanation: { type: 'string' },
+        results: {
+          type: 'array',
+          default: [],
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'content', 'pinned'],
+            properties: {
+              id: { type: 'string' },
+              content: { type: 'string' },
+              pinned: { type: 'boolean' },
+              createdAt: { type: 'string' },
+              score: { type: 'number' }
+            }
+          }
+        }
+      }
+    }
+  },
+  list: {
+    input: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 100 }
+      }
+    },
+    output: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['explanation', 'items'],
+      properties: {
+        explanation: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'content', 'pinned'],
+            properties: {
+              id: { type: 'string' },
+              content: { type: 'string' },
+              pinned: { type: 'boolean' },
+              createdAt: { type: 'string' }
+            }
+          }
+        }
+      }
+    }
+  },
+  pin: {
+    input: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['id'],
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        pin: { type: 'boolean' }
+      }
+    },
+    output: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'pinned', 'explanation'],
+      properties: {
+        success: { type: 'boolean' },
+        pinned: { type: 'boolean' },
+        explanation: { type: 'string' }
+      }
+    }
+  },
+  forget: {
+    input: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['id'],
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        reason: { type: 'string', minLength: 1 }
+      }
+    },
+    output: {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'explanation'],
+      properties: {
+        success: { type: 'boolean' },
+        explanation: { type: 'string' }
+      }
+    }
+  }
+};
 
-// Zod shapes for tool schemas
-const storeInputShape = {
-  content: z.string(),
-  pinned: z.boolean().optional()
-};
-const storeOutputShape = {
-  id: z.string(),
-  pinned: z.boolean(),
-  explanation: z.string(),
-  forgottenMemoryId: z.string().nullable()
-};
+function createValidator(schema) {
+  if (!schema) {
+    return () => ({ valid: true, data: undefined, errors: [] });
+  }
+  const validate = ajv.compile(schema);
+  return (data) => {
+    const valid = validate(data);
+    return { valid, data, errors: validate.errors ?? [] };
+  };
+}
 
-const searchInputShape = {
-  query: z.string(),
-  limit: z.number().int().positive().max(20).optional()
-};
-const searchOutputShape = {
-  query: z.string(),
-  explanation: z.string(),
-  results: z
-    .array(
-      z.object({
-        id: z.string(),
-        content: z.string(),
-        pinned: z.boolean(),
-        createdAt: z.string().optional(),
-        score: z.number().optional()
-      })
-    )
-    .default([])
-};
+function formatAjvErrors(errors) {
+  if (!errors || errors.length === 0) {
+    return 'Unknown validation error';
+  }
 
-const listInputShape = {
-  limit: z.number().int().positive().max(100).optional()
-};
-const listOutputShape = {
-  explanation: z.string(),
-  items: z.array(
-    z.object({
-      id: z.string(),
-      content: z.string(),
-      pinned: z.boolean(),
-      createdAt: z.string().optional()
+  return errors
+    .map((error) => {
+      const path = error.instancePath ? error.instancePath.slice(1) : '';
+      const location = path || '(root)';
+      const message = error.message || 'is invalid';
+      return `${location} ${message}`;
     })
-  )
-};
+    .join('; ');
+}
 
-const pinInputShape = {
-  id: z.string(),
-  pin: z.boolean().optional()
-};
-const pinOutputShape = {
-  success: z.boolean(),
-  pinned: z.boolean(),
-  explanation: z.string()
-};
-
-const forgetInputShape = {
-  id: z.string(),
-  reason: z.string().optional()
-};
-const forgetOutputShape = {
-  success: z.boolean(),
-  explanation: z.string()
-};
-
-server.registerTool(
-  'capsule-memory.store',
+const TOOL_DEFINITIONS = [
   {
+    name: 'capsule-memory.store',
     description:
       'Persist a new memory entry in Capsule Memory. Optionally pin it to prevent auto-forget.',
-    inputSchema: zodToJsonSchema(z.object(storeInputShape))
-  },
-  async ({ content, pinned }) => {
-    const result = await callModelenceMethod('memory.addMemory', {
-      content,
-      pinned
-    });
+    inputSchema: JSON_SCHEMAS.store.input,
+    outputSchema: JSON_SCHEMAS.store.output,
+    handler: async ({ content, pinned }) => {
+      const result = await callModelenceMethod('memory.addMemory', {
+        content,
+        pinned
+      });
 
-    const structured = {
-      id: result.id,
-      pinned: Boolean(result.pinned),
-      explanation: result.explanation,
-      forgottenMemoryId: result.forgottenMemoryId ?? null
-    };
+      const structured = {
+        id: result.id,
+        pinned: Boolean(result.pinned),
+        explanation: result.explanation ?? '',
+        forgottenMemoryId: result.forgottenMemoryId ?? null
+      };
 
-    const textLines = [
-      `Saved memory ${result.id} (${structured.pinned ? 'pinned' : 'unpinned'}).`,
-      structured.explanation
-    ];
-    if (structured.forgottenMemoryId) {
-      textLines.push(`Auto-forgot memory ${structured.forgottenMemoryId}.`);
+      const textLines = [
+        `Saved memory ${structured.id} (${structured.pinned ? 'pinned' : 'unpinned'}).`,
+        structured.explanation
+      ];
+      if (structured.forgottenMemoryId) {
+        textLines.push(
+          `Auto-forgot memory ${structured.forgottenMemoryId}.`
+        );
+      }
+
+      return {
+        content: [{ type: 'text', text: textLines.join('\n') }],
+        structuredContent: structured
+      };
     }
-
-    return {
-      content: [{ type: 'text', text: textLines.join('\n') }],
-      structuredContent: structured
-    };
-  }
-);
-
-server.registerTool(
-  'capsule-memory.search',
+  },
   {
+    name: 'capsule-memory.search',
     description:
       'Run semantic search against Capsule Memory and return the most relevant entries.',
-    inputSchema: zodToJsonSchema(z.object(searchInputShape))
+    inputSchema: JSON_SCHEMAS.search.input,
+    outputSchema: JSON_SCHEMAS.search.output,
+    handler: async ({ query, limit }) => {
+      const data = await callModelenceMethod('memory.searchMemory', {
+        query,
+        limit
+      });
+
+      const rawResults = Array.isArray(data.results) ? data.results : [];
+      const results = rawResults.map((memory) => ({
+        ...serializeMemory(memory),
+        ...(memory.score !== undefined ? { score: memory.score } : {})
+      }));
+      const lines = [
+        data.explanation ?? `Found ${results.length} memories.`,
+        '',
+        ...rawResults.map((memory, index) => {
+          const score =
+            memory.score !== undefined
+              ? ` (score: ${memory.score.toFixed(3)})`
+              : '';
+          return `${index + 1}. ${formatMemorySummary(memory)}${score}`;
+        })
+      ];
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: {
+          query: data.query ?? query,
+          explanation: data.explanation ?? '',
+          results
+        }
+      };
+    }
   },
-  async ({ query, limit }) => {
-    const data = await callModelenceMethod('memory.searchMemory', {
-      query,
-      limit
-    });
-
-    const rawResults = Array.isArray(data.results) ? data.results : [];
-    const results = rawResults.map((memory) => ({
-      ...serializeMemory(memory),
-      ...(memory.score !== undefined ? { score: memory.score } : {})
-    }));
-    const lines = [
-      data.explanation ?? `Found ${results.length} memories.`,
-      '',
-      ...rawResults.map((memory, index) => {
-        const score =
-          memory.score !== undefined
-            ? ` (score: ${memory.score.toFixed(3)})`
-            : '';
-        return `${index + 1}. ${formatMemorySummary(memory)}${score}`;
-      })
-    ];
-
-    return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-      structuredContent: {
-        query: data.query ?? query,
-        explanation: data.explanation ?? '',
-        results
-      }
-    };
-  }
-);
-
-server.registerTool(
-  'capsule-memory.list',
   {
+    name: 'capsule-memory.list',
     description:
       'Fetch the latest stored memories (pinned entries are prioritised).',
-    inputSchema: zodToJsonSchema(z.object(listInputShape))
+    inputSchema: JSON_SCHEMAS.list.input,
+    outputSchema: JSON_SCHEMAS.list.output,
+    handler: async ({ limit }) => {
+      const data = await callModelenceMethod('memory.getMemories', { limit });
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const items = rawItems.map(serializeMemory);
+      const lines = [
+        data.explanation ?? `Loaded ${items.length} memories.`,
+        '',
+        ...rawItems.map(
+          (memory, index) => `${index + 1}. ${formatMemorySummary(memory)}`
+        )
+      ];
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: {
+          explanation: data.explanation ?? '',
+          items
+        }
+      };
+    }
   },
-  async ({ limit }) => {
-    const data = await callModelenceMethod('memory.getMemories', { limit });
-    const rawItems = Array.isArray(data.items) ? data.items : [];
-    const items = rawItems.map(serializeMemory);
-    const lines = [
-      data.explanation ?? `Loaded ${items.length} memories.`,
-      '',
-      ...rawItems.map(
-        (memory, index) => `${index + 1}. ${formatMemorySummary(memory)}`
-      )
-    ];
-
-    return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-      structuredContent: {
-        explanation: data.explanation ?? '',
-        items
-      }
-    };
-  }
-);
-
-server.registerTool(
-  'capsule-memory.pin',
   {
+    name: 'capsule-memory.pin',
     description:
       'Toggle the pinned status of an existing memory to protect it from auto-forget.',
-    inputSchema: zodToJsonSchema(z.object(pinInputShape))
+    inputSchema: JSON_SCHEMAS.pin.input,
+    outputSchema: JSON_SCHEMAS.pin.output,
+    handler: async ({ id, pin }) => {
+      const result = await callModelenceMethod('memory.pinMemory', { id, pin });
+      const structured = {
+        success: Boolean(result.success),
+        pinned: Boolean(result.pinned),
+        explanation: result.explanation ?? ''
+      };
+
+      const text = `${structured.explanation || 'Updated pinned state.'} (pinned = ${
+        structured.pinned ? 'true' : 'false'
+      })`;
+
+      return {
+        content: [{ type: 'text', text }],
+        structuredContent: structured
+      };
+    }
   },
-  async ({ id, pin }) => {
-    const result = await callModelenceMethod('memory.pinMemory', { id, pin });
-    const structured = {
-      success: Boolean(result.success),
-      pinned: Boolean(result.pinned),
-      explanation: result.explanation ?? ''
-    };
-    const text = `${structured.explanation || 'Updated pinned state.'} (pinned = ${
-      structured.pinned ? 'true' : 'false'
-    })`;
-
-    return {
-      content: [{ type: 'text', text }],
-      structuredContent: structured
-    };
-  }
-);
-
-server.registerTool(
-  'capsule-memory.forget',
   {
+    name: 'capsule-memory.forget',
     description:
       'Delete a memory by ID. Provide an optional reason to log alongside the deletion.',
-    inputSchema: zodToJsonSchema(z.object(forgetInputShape))
-  },
-  async ({ id, reason }) => {
-    const result = await callModelenceMethod('memory.deleteMemory', {
-      id,
-      reason
-    });
-    const structured = {
-      success: Boolean(result.success),
-      explanation: result.explanation ?? `Memory ${id} forgotten.`
-    };
+    inputSchema: JSON_SCHEMAS.forget.input,
+    outputSchema: JSON_SCHEMAS.forget.output,
+    handler: async ({ id, reason }) => {
+      const result = await callModelenceMethod('memory.deleteMemory', {
+        id,
+        reason
+      });
+      const structured = {
+        success: Boolean(result.success),
+        explanation: result.explanation ?? `Memory ${id} forgotten.`
+      };
 
-    return {
-      content: [{ type: 'text', text: structured.explanation }],
-      structuredContent: structured
-    };
+      return {
+        content: [{ type: 'text', text: structured.explanation }],
+        structuredContent: structured
+      };
+    }
+  }
+];
+
+const toolRegistry = TOOL_DEFINITIONS.reduce((registry, tool) => {
+  registry[tool.name] = {
+    ...tool,
+    validateInput: createValidator(tool.inputSchema),
+    validateOutput: createValidator(tool.outputSchema)
+  };
+  return registry;
+}, {});
+
+const server = new Server(
+  { name: 'capsule-memory-mcp', version: '0.2.0' },
+  {
+    capabilities: {
+      tools: { listChanged: true },
+      resources: { listChanged: false }
+    }
   }
 );
+
+server.setRequestHandler(ListToolsRequestSchema, () => ({
+  tools: TOOL_DEFINITIONS.map(
+    ({ name, description, inputSchema, outputSchema }) => ({
+      name,
+      description,
+      inputSchema,
+      ...(outputSchema ? { outputSchema } : {})
+    })
+  )
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  const tool = toolRegistry[request.params.name];
+  if (!tool) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Tool ${request.params.name} not found`
+    );
+  }
+
+  const args = clone(request.params.arguments ?? {});
+  const validation = tool.validateInput(args);
+  if (!validation.valid) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid arguments for tool ${request.params.name}: ${formatAjvErrors(
+        validation.errors
+      )}`
+    );
+  }
+
+  let result;
+  try {
+    result = await tool.handler(args, extra);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : `Unknown error: ${error}`;
+    return {
+      content: [{ type: 'text', text: message }],
+      isError: true
+    };
+  }
+
+  if (!result || typeof result !== 'object') {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Tool ${request.params.name} returned an invalid response`
+    );
+  }
+
+  if (!Array.isArray(result.content)) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Tool ${request.params.name} must return a content array`
+    );
+  }
+
+  if (tool.outputSchema && !result.isError) {
+    if (!result.structuredContent) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Tool ${request.params.name} expected structured content but none was provided`
+      );
+    }
+    const outputClone = clone(result.structuredContent);
+    const outputValidation = tool.validateOutput(outputClone);
+    if (!outputValidation.valid) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid structured content for tool ${
+          request.params.name
+        }: ${formatAjvErrors(outputValidation.errors)}`
+      );
+    }
+    result.structuredContent = outputClone;
+  }
+
+  return result;
+});
+
+server.setRequestHandler(ListResourcesRequestSchema, () => ({
+  resources: []
+}));
+
+server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({
+  resourceTemplates: []
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, (request) => {
+  throw new McpError(
+    ErrorCode.InvalidRequest,
+    `Resource ${request.params.uri} is not available from this server`
+  );
+});
 
 const transport = new StdioServerTransport();
 
@@ -341,6 +573,8 @@ let keepAlive;
 try {
   await server.connect(transport);
   console.error('Capsule Memory MCP bridge ready');
+  server.sendToolListChanged();
+  server.sendResourceListChanged();
   keepAlive = setInterval(() => {}, 60_000);
 } catch (error) {
   console.error('Failed to start Capsule Memory MCP server:', error);
