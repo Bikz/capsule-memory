@@ -31,6 +31,19 @@ export type StorageConfig = {
   dedupeThreshold?: number | null;
 };
 
+export type StoragePolicySummary = {
+  name: string;
+  description?: string;
+  defaults?: {
+    store?: StorageDestination;
+    ttlSeconds?: number | null;
+    graphEnrich?: boolean;
+    dedupeThreshold?: number;
+    importanceScore?: number;
+    notes?: string;
+  };
+};
+
 export type CreateMemoryInput = {
   content: string;
   pinned?: boolean;
@@ -182,6 +195,14 @@ export class CapsuleMemoryClient {
       body: JSON.stringify({ query: input.query, limit: input.limit, recipe: input.recipe }),
       subjectId: input.subjectId
     });
+  }
+
+  async listSearchRecipes() {
+    return this.request("/v1/memories/recipes", { method: "GET" });
+  }
+
+  async listStoragePolicies(): Promise<{ policies: StoragePolicySummary[] }> {
+    return this.request("/v1/memories/policies", { method: "GET" });
   }
 
   async updateMemory(input: UpdateMemoryInput) {

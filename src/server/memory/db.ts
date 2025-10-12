@@ -48,6 +48,7 @@ export const dbMemories = new Store('memories', {
       })
       .optional(),
     piiFlags: schema.object({}).catchall(schema.boolean()).optional(),
+    piiFlagsCipher: schema.string().optional(),
     graphEnrich: schema.boolean().optional(),
     storage: schema
       .object({

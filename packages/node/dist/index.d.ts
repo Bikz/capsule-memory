@@ -24,6 +24,18 @@ export type StorageConfig = {
     graphEnrich?: boolean | null;
     dedupeThreshold?: number | null;
 };
+export type StoragePolicySummary = {
+    name: string;
+    description?: string;
+    defaults?: {
+        store?: StorageDestination;
+        ttlSeconds?: number | null;
+        graphEnrich?: boolean;
+        dedupeThreshold?: number;
+        importanceScore?: number;
+        notes?: string;
+    };
+};
 export type CreateMemoryInput = {
     content: string;
     pinned?: boolean;
@@ -84,6 +96,10 @@ export declare class CapsuleMemoryClient {
     storeMemory(input: CreateMemoryInput): Promise<unknown>;
     listMemories(input?: ListInput): Promise<unknown>;
     search(input: SearchInput): Promise<unknown>;
+    listSearchRecipes(): Promise<unknown>;
+    listStoragePolicies(): Promise<{
+        policies: StoragePolicySummary[];
+    }>;
     updateMemory(input: UpdateMemoryInput): Promise<unknown>;
     deleteMemory(input: DeleteInput): Promise<unknown>;
 }

@@ -17,8 +17,15 @@ import {
   resolveSource,
   resolveTypeValue
 } from './meta';
-import { defaultStoragePolicies, evaluateStoragePolicies } from './policies';
-import { applyRecipeWeight, describeRecipeMatch, getSearchRecipe, listSearchRecipes } from './recipes';
+import { defaultStoragePolicies, evaluateStoragePolicies, listStoragePolicySummaries } from './policies';
+import { decryptPiiFlags, encryptPiiFlags } from './security';
+import {
+  applyRecipeWeight,
+  describeRecipeMatch,
+  getSearchRecipe,
+  listSearchRecipes as listRecipeCatalog
+} from './recipes';
+import { logPolicyDecision, logRecipeUsage } from './logging';
 import { generateEmbedding } from './voyage';
 
 type MemoryDocument = typeof dbMemories.Doc;
@@ -283,7 +290,7 @@ function cosineSimilarity(
 }
 
 function toClientMemory(doc: MemoryDocument) {
-  const { embedding, embeddingNorm, _id, ...rest } = doc as MemoryDocument & {
+  const { embedding, embeddingNorm, _id, piiFlagsCipher, ...rest } = doc as MemoryDocument & {
     embeddingModel?: string;
     provenance?: unknown;
     lang?: string;
@@ -321,6 +328,10 @@ function toClientMemory(doc: MemoryDocument) {
     typeof (rest as { graphEnrich?: unknown }).graphEnrich === 'boolean'
       ? (rest as { graphEnrich?: boolean }).graphEnrich
       : storageValue.graphEnrich ?? false;
+  const piiFlagsValue =
+    rest.piiFlags && typeof rest.piiFlags === 'object'
+      ? (rest.piiFlags as CapsulePiiFlags)
+      : decryptPiiFlags(piiFlagsCipher);
   return {
     id: _id.toString(),
     ...rest,
@@ -331,7 +342,8 @@ function toClientMemory(doc: MemoryDocument) {
     provenance: provenanceValue,
     embeddingModel: embeddingModelValue,
     storage: storageValue,
-    graphEnrich: graphEnrichValue
+    graphEnrich: graphEnrichValue,
+    ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {})
   };
 }
 
@@ -349,6 +361,23 @@ function sanitizeTags(tags?: string[] | null): string[] | undefined {
   }
   const unique = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
   return unique.length > 0 ? unique : undefined;
+}
+
+function hasSensitivePii(piiFlags?: CapsulePiiFlags | null): boolean {
+  if (!piiFlags) {
+    return false;
+  }
+  return Object.values(piiFlags).some((value) => value === true);
+}
+
+function resolveStoredPiiFlags(doc?: MemoryDocument | null): CapsulePiiFlags | undefined {
+  if (!doc) {
+    return undefined;
+  }
+  if (doc.piiFlags && typeof doc.piiFlags === 'object') {
+    return doc.piiFlags as CapsulePiiFlags;
+  }
+  return decryptPiiFlags((doc as { piiFlagsCipher?: string }).piiFlagsCipher);
 }
 
 function sanitizeLanguageOverride(lang?: string | null): string | undefined {
@@ -430,6 +459,10 @@ async function createMemory(
   const aclValue = resolveAcl(input.acl ?? null);
   const piiFlagsValue = resolvePiiFlags(input.piiFlags ?? undefined);
 
+  if (hasSensitivePii(piiFlagsValue) && aclValue.visibility === 'public') {
+    throw new Error('Cannot store PII when ACL visibility is public. Choose a private or shared scope.');
+  }
+
   const policyContext = {
     type: typeValue,
     source: sourceValue,
@@ -484,12 +517,25 @@ async function createMemory(
     })
   ];
 
+  const piiEncryption = encryptPiiFlags(piiFlagsValue);
+
   const storageState: CapsuleStorageState = {
     store: finalStore,
     policies: policiesApplied,
     graphEnrich: graphEnrichValue,
     ...(typeof dedupeThreshold === 'number' ? { dedupeThreshold } : {})
   };
+
+  logPolicyDecision({
+    scope,
+    storage: storageState,
+    policies: policiesApplied,
+    pinned: pinnedValue,
+    type: typeValue,
+    tags: sanitizedTags,
+    source: sourceValue,
+    acl: aclValue
+  });
 
   const doc = {
     ...filter,
@@ -513,7 +559,11 @@ async function createMemory(
     ...(expiresAt ? { expiresAt } : {}),
     ...(typeValue ? { type: typeValue } : {}),
     ...(sourceValue ? { source: sourceValue } : {}),
-    ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {}),
+    ...(piiEncryption.cipher
+      ? { piiFlagsCipher: piiEncryption.cipher }
+      : piiFlagsValue
+        ? { piiFlags: piiFlagsValue }
+        : {}),
     ...(idempotencyKey ? { idempotencyKey } : {})
   };
 
@@ -541,7 +591,11 @@ async function createMemory(
     ...(expiresAt ? { expiresAt } : {}),
     ...(typeValue ? { type: typeValue } : {}),
     ...(sourceValue ? { source: sourceValue } : {}),
-    ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {}),
+    ...(piiEncryption.cipher
+      ? { piiFlagsCipher: piiEncryption.cipher }
+      : piiFlagsValue
+        ? { piiFlags: piiFlagsValue }
+        : {}),
     explanation: retention.explanation,
     forgottenMemoryId: retention.forgottenMemoryId
   };
@@ -660,6 +714,14 @@ async function searchMemories(
     `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
     `item(s).`;
 
+  logRecipeUsage({
+    scope,
+    recipe,
+    limit: limitValue,
+    candidateLimit,
+    resultCount: results.length
+  });
+
   return {
     query: queryString,
     results,
@@ -685,13 +747,14 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   } = input;
 
   const objectId = toObjectId(id);
-  let existingDocForStorage: MemoryDocument | null = null;
-  if (storage !== undefined) {
-    existingDocForStorage = await dbMemories.findOne({
+  const needsExistingDoc = storage !== undefined || acl !== undefined || piiFlags !== undefined;
+  let existingDoc: MemoryDocument | null = null;
+  if (needsExistingDoc) {
+    existingDoc = await dbMemories.findOne({
       _id: objectId,
       ...memoryScopeFilter(scope)
     });
-    if (!existingDocForStorage) {
+    if (!existingDoc) {
       throw new Error('Memory not found.');
     }
   }
@@ -805,6 +868,13 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   if (acl !== undefined) {
     mutated = true;
     const resolvedAcl = resolveAcl(acl ?? null);
+    if (
+      resolvedAcl.visibility === 'public' &&
+      piiFlags === undefined &&
+      hasSensitivePii(resolveStoredPiiFlags(existingDoc))
+    ) {
+      throw new Error('Cannot set visibility to public while PII flags remain. Clear PII or choose a private scope.');
+    }
     update.acl = resolvedAcl;
     response.acl = resolvedAcl;
   }
@@ -812,11 +882,28 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   if (piiFlags !== undefined) {
     mutated = true;
     const resolvedFlags = resolvePiiFlags(piiFlags ?? undefined);
-    if (resolvedFlags) {
-      update.piiFlags = resolvedFlags;
+    const effectiveAcl =
+      (response.acl as CapsuleAcl | undefined) ??
+      (update.acl as CapsuleAcl | undefined) ??
+      existingDoc?.acl ??
+      resolveAcl(null);
+    if (hasSensitivePii(resolvedFlags) && effectiveAcl.visibility === 'public') {
+      throw new Error('Cannot store PII when ACL visibility is public. Choose a private or shared scope.');
+    }
+
+    if (resolvedFlags && Object.keys(resolvedFlags).length > 0) {
+      const piiEncryption = encryptPiiFlags(resolvedFlags);
+      if (piiEncryption.cipher) {
+        update.piiFlagsCipher = piiEncryption.cipher;
+        unset.piiFlags = '';
+      } else {
+        update.piiFlags = resolvedFlags;
+        unset.piiFlagsCipher = '';
+      }
       response.piiFlags = resolvedFlags;
     } else {
       unset.piiFlags = '';
+      unset.piiFlagsCipher = '';
       response.piiFlags = {};
     }
   }
@@ -829,13 +916,13 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
       response.storage = null;
       response.graphEnrich = false;
     } else {
-      const existingPolicies = Array.isArray(existingDocForStorage?.storage?.policies)
-        ? existingDocForStorage?.storage?.policies ?? []
+      const existingPolicies = Array.isArray(existingDoc?.storage?.policies)
+        ? existingDoc?.storage?.policies ?? []
         : [];
       const mergedPolicies = Array.from(new Set([...existingPolicies, 'manual-override']));
 
       const storeValue: StorageDestination =
-        storage.store ?? existingDocForStorage?.storage?.store ?? 'long_term';
+        storage.store ?? existingDoc?.storage?.store ?? 'long_term';
 
       const dedupeOverride = storage.dedupeThreshold;
       const dedupeValue =
@@ -843,7 +930,7 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
           ? undefined
           : typeof dedupeOverride === 'number'
             ? dedupeOverride
-            : existingDocForStorage?.storage?.dedupeThreshold;
+            : existingDoc?.storage?.dedupeThreshold;
 
       const graphOverride = storage.graphEnrich ?? undefined;
       let graphEnrichValue: boolean;
@@ -851,10 +938,10 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
         graphEnrichValue = false;
       } else if (typeof graphOverride === 'boolean') {
         graphEnrichValue = graphOverride;
-      } else if (typeof existingDocForStorage?.graphEnrich === 'boolean') {
-        graphEnrichValue = existingDocForStorage.graphEnrich;
-      } else if (typeof existingDocForStorage?.storage?.graphEnrich === 'boolean') {
-        graphEnrichValue = existingDocForStorage.storage.graphEnrich;
+      } else if (typeof existingDoc?.graphEnrich === 'boolean') {
+        graphEnrichValue = existingDoc.graphEnrich;
+      } else if (typeof existingDoc?.storage?.graphEnrich === 'boolean') {
+        graphEnrichValue = existingDoc.storage.graphEnrich;
       } else {
         graphEnrichValue = false;
       }
@@ -1085,7 +1172,13 @@ const apiRoutes: RouteDefinition[] = [
   {
     path: '/v1/memories/recipes',
     handlers: {
-      get: withAuth(async () => buildResponse({ recipes: listSearchRecipes() }))
+      get: withAuth(async () => buildResponse({ recipes: listRecipeCatalog() }))
+    }
+  },
+  {
+    path: '/v1/memories/policies',
+    handlers: {
+      get: withAuth(async () => buildResponse({ policies: listStoragePolicySummaries() }))
     }
   },
   {
@@ -1180,7 +1273,12 @@ export default new Module('memory', {
     },
     listSearchRecipes() {
       return {
-        recipes: listSearchRecipes()
+        recipes: listRecipeCatalog()
+      };
+    },
+    listStoragePolicies() {
+      return {
+        policies: listStoragePolicySummaries()
       };
     }
   },

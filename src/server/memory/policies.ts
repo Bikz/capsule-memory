@@ -18,6 +18,14 @@ export type StoragePolicyEffect = {
 export type StoragePolicy = {
   name: string;
   description?: string;
+  summary?: {
+    store?: StorageDestination;
+    ttlSeconds?: number | null;
+    graphEnrich?: boolean;
+    dedupeThreshold?: number;
+    importanceScore?: number;
+    notes?: string;
+  };
   match: (context: StoragePolicyContext) => boolean;
   apply: (context: StoragePolicyContext) => StoragePolicyEffect;
 };
@@ -71,6 +79,12 @@ export const defaultStoragePolicies: StoragePolicy[] = [
   {
     name: 'preferences-long-term',
     description: 'Keep user preferences indefinitely in the long-term store with dedupe hints.',
+    summary: {
+      store: 'long_term',
+      ttlSeconds: null,
+      dedupeThreshold: 0.9,
+      importanceScore: 1.5
+    },
     match: (context) => context.type === 'preference',
     apply: () => ({
       store: 'long_term',
@@ -82,6 +96,11 @@ export const defaultStoragePolicies: StoragePolicy[] = [
   {
     name: 'operational-logs-short-term',
     description: 'Short-lived operational logs flow to the ring buffer.',
+    summary: {
+      store: 'short_term',
+      ttlSeconds: 60 * 60 * 24 * 14,
+      graphEnrich: false
+    },
     match: (context) => context.type === 'log',
     apply: () => ({
       store: 'short_term',
@@ -92,6 +111,11 @@ export const defaultStoragePolicies: StoragePolicy[] = [
   {
     name: 'knowledge-connectors-long-term',
     description: 'Connector sourced docs default to long-term store with graph enrichment.',
+    summary: {
+      store: 'long_term',
+      graphEnrich: true,
+      notes: 'Triggers when source.connector ∈ {notion, drive}'
+    },
     match: (context) =>
       Boolean(context.source?.connector && CONNECTOR_LONG_TERM.has(context.source.connector)),
     apply: () => ({
@@ -100,3 +124,30 @@ export const defaultStoragePolicies: StoragePolicy[] = [
     })
   }
 ];
+
+export type StoragePolicySummary = {
+  name: string;
+  description?: string;
+  defaults?: StoragePolicy['summary'];
+};
+
+export function listStoragePolicySummaries(): StoragePolicySummary[] {
+  const basePolicy: StoragePolicySummary = {
+    name: 'default',
+    description: 'Fallback policy when no specific matcher triggers.',
+    defaults: {
+      store: 'long_term',
+      ttlSeconds: undefined,
+      graphEnrich: false
+    }
+  };
+
+  return [
+    basePolicy,
+    ...defaultStoragePolicies.map((policy) => ({
+      name: policy.name,
+      description: policy.description,
+      defaults: policy.summary
+    }))
+  ];
+}

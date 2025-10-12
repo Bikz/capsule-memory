@@ -32,6 +32,7 @@ apply basic retention policies that keep the store tidy without losing important
    ```bash
    MONGO_URL="mongodb+srv://…"    # required when running against Atlas/Modelence Cloud
    VOYAGE_API_KEY="sk-…"          # optional – enables true Voyage embeddings
+   CAPSULE_META_ENCRYPTION_KEY="<base64-32-bytes>"  # optional – encrypts piiFlags at rest
    ```
    Without `VOYAGE_API_KEY` the backend automatically switches to a deterministic fallback embedding so development and tests can
    run offline.
@@ -96,6 +97,35 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run build`| Build the production bundle.        |
 | `npm start`    | Launch the compiled server bundle.  |
 | `npm run mcp`  | Start the Capsule Memory MCP bridge.|
+| `npm run backfill` | Run the metadata backfill for existing memories. |
+| `npm run policies` | Print the current storage policy catalogue. |
+
+### Backfill existing memories
+
+After upgrading to the CapsuleMeta-aware schema, run the backfill once to populate `lang`, `storage`,
+`graphEnrich`, provenance, and default scoring fields for previously stored memories:
+
+```bash
+MONGO_URL="mongodb://…" npm run backfill -- --dry-run   # inspect changes without writing
+MONGO_URL="mongodb://…" npm run backfill                # apply updates in-place
+```
+
+Optional flags:
+- `--dry-run` / `-d` – log the intended updates without persisting.
+- `--verbose` / `-v` – print each document update payload for auditing.
+- `BACKFILL_BATCH_SIZE` – override the default batch size (`50`).
+
+The script respects `MONGO_DB` if you need to target a specific database within the Mongo deployment.
+
+### Security controls
+
+- **ACL enforcement**: requests cannot set `visibility="public"` while PII flags remain. Clear or redact PII before expanding
+  access.
+- **Metadata encryption**: set `CAPSULE_META_ENCRYPTION_KEY` (32-byte key, UTF-8 or base64) to encrypt `piiFlags` at rest. The key
+  is required to read or mutate encrypted flags—store it securely (e.g., in your KMS).
+- **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
+  events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
+- **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity

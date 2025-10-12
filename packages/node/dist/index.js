@@ -91,6 +91,12 @@ export class CapsuleMemoryClient {
             subjectId: input.subjectId
         });
     }
+    async listSearchRecipes() {
+        return this.request("/v1/memories/recipes", { method: "GET" });
+    }
+    async listStoragePolicies() {
+        return this.request("/v1/memories/policies", { method: "GET" });
+    }
     async updateMemory(input) {
         return this.request(`/v1/memories/${encodeURIComponent(input.id)}`, {
             method: "PATCH",
