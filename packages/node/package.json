@@ -1,27 +1,22 @@
 {
   "name": "@capsule-memory/node",
   "version": "0.1.0",
-  "description": "Node.js SDK for the Capsule Memory production API",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": [
-    "dist"
-  ],
-  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
-  "keywords": [
-    "capsule-memory",
-    "sdk",
-    "memory",
-    "ai",
-    "agents"
-  ],
-  "license": "MIT",
+  "engines": { "node": ">=18" },
   "dependencies": {},
-  "peerDependencies": {
-    "typescript": ">=5.0.0"
+  "devDependencies": {
+    "typescript": "^5.5.0"
   }
 }
