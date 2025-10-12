@@ -1,0 +1,6 @@
+node_modules
+.modelence
+packages/node/dist
+.git
+.gitignore
+npm-debug.log

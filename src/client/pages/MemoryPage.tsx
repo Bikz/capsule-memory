@@ -9,6 +9,11 @@ type MemoryItem = {
   content: string;
   createdAt: string | Date;
   pinned: boolean;
+  orgId: string;
+  projectId: string;
+  subjectId: string;
+  tags?: string[];
+  expiresAt?: string | Date;
 };
 
 type GetMemoriesResponse = {
@@ -21,6 +26,11 @@ type AddMemoryResponse = {
   content: string;
   pinned: boolean;
   createdAt: string | Date;
+  orgId: string;
+  projectId: string;
+  subjectId: string;
+  tags?: string[];
+  expiresAt?: string | Date;
   explanation: string;
   forgottenMemoryId: string | null;
 };
@@ -53,9 +63,20 @@ export default function MemoryPage(): JSX.Element {
   const [pinned, setPinned] = useState(false);
   const [searchInput, setSearchInput] = useState('');
 
+  const tenant = useMemo(
+    () => ({
+      orgId: (import.meta.env.VITE_CAPSULE_ORG_ID as string | undefined) ?? 'demo-org',
+      projectId:
+        (import.meta.env.VITE_CAPSULE_PROJECT_ID as string | undefined) ?? 'demo-project',
+      subjectId:
+        (import.meta.env.VITE_CAPSULE_SUBJECT_ID as string | undefined) ?? 'local-operator'
+    }),
+    []
+  );
+
   const memoriesQuery = useQuery<GetMemoriesResponse>({
     queryKey: ['memory.getMemories'],
-    queryFn: () => callMethod<GetMemoriesResponse>('memory.getMemories'),
+    queryFn: () => callMethod<GetMemoriesResponse>('memory.getMemories', tenant),
   });
 
   const addMemoryMutation = useMutation<
@@ -64,7 +85,11 @@ export default function MemoryPage(): JSX.Element {
     { content: string; pinned: boolean }
   >({
     mutationFn: (variables: { content: string; pinned: boolean }) =>
-      callMethod<AddMemoryResponse>('memory.addMemory', variables),
+      callMethod<AddMemoryResponse>('memory.addMemory', {
+        ...tenant,
+        content: variables.content,
+        pinned: variables.pinned,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory.getMemories'] });
       setContent('');
@@ -78,7 +103,11 @@ export default function MemoryPage(): JSX.Element {
     { id: string; pin: boolean }
   >({
     mutationFn: (variables: { id: string; pin: boolean }) =>
-      callMethod<PinMemoryResponse>('memory.pinMemory', variables),
+      callMethod<PinMemoryResponse>('memory.pinMemory', {
+        ...tenant,
+        id: variables.id,
+        pin: variables.pin,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory.getMemories'] });
     },
@@ -90,7 +119,11 @@ export default function MemoryPage(): JSX.Element {
     { id: string; reason?: string }
   >({
     mutationFn: (variables: { id: string; reason?: string }) =>
-      callMethod<DeleteMemoryResponse>('memory.deleteMemory', variables),
+      callMethod<DeleteMemoryResponse>('memory.deleteMemory', {
+        ...tenant,
+        id: variables.id,
+        reason: variables.reason,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory.getMemories'] });
     },
@@ -102,7 +135,10 @@ export default function MemoryPage(): JSX.Element {
     { query: string }
   >({
     mutationFn: (variables: { query: string }) =>
-      callMethod<SearchMemoryResponse>('memory.searchMemory', { query: variables.query }),
+      callMethod<SearchMemoryResponse>('memory.searchMemory', {
+        ...tenant,
+        query: variables.query,
+      }),
   });
 
   const memoryCount = memoriesQuery.data?.items?.length ?? 0;

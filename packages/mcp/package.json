@@ -1,0 +1,23 @@
+{
+  "name": "@capsule-memory/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol bridge for Capsule Memory",
+  "type": "module",
+  "bin": {
+    "capsule-memory-mcp": "src/index.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "capsule-memory",
+    "mcp",
+    "agent",
+    "memory"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "ajv": "^8.17.1"
+  }
+}

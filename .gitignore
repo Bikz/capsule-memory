@@ -6,6 +6,8 @@ node_modules
 # Production
 dist
 build
+!packages/node/dist/
+!packages/node/dist/**
 
 # Testing
 coverage

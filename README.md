@@ -84,6 +84,11 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 
 `src/client/pages/HomePage.tsx` includes a quick link to the memory console so landing on `/` provides an easy entry point.
 
+## Production API & SDKs
+- **REST API** – Authenticated `/v1` routes expect `X-Capsule-Key`, `X-Capsule-Org`, `X-Capsule-Project`, and `X-Capsule-Subject` headers for multi-tenant scoping.
+- **Node SDK** – `@capsule-memory/node` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
+- **MCP CLI** – `@capsule-memory/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
+
 ## Useful Commands
 | Command        | Description                         |
 |----------------|-------------------------------------|

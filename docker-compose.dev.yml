@@ -1,0 +1,42 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      target: deps
+    working_dir: /app
+    command: npm run dev
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+    environment:
+      MONGO_URL: mongodb://capsule-memory:password@mongo:27017/capsule-memory?authSource=admin
+      CAPSULE_DEFAULT_ORG_ID: demo-org
+      CAPSULE_DEFAULT_PROJECT_ID: demo-project
+      CAPSULE_DEFAULT_SUBJECT_ID: local-developer
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: capsule-memory
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--username", "capsule-memory", "--password", "password", "--host", "localhost", "--port", "27017", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo-data:
