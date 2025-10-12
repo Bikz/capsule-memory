@@ -6,12 +6,38 @@ export type CommonOpts = {
     defaultSubjectId: string;
     fetchImpl?: typeof fetch;
 };
+export type CapsuleVisibility = "private" | "shared" | "public";
+export type CapsuleAcl = {
+    visibility: CapsuleVisibility;
+};
+export type CapsuleSource = {
+    app?: string;
+    connector?: string;
+    url?: string;
+    fileId?: string;
+    spanId?: string;
+};
+export type CapsulePiiFlags = Record<string, boolean>;
+export type StorageDestination = "short_term" | "long_term" | "capsule_graph";
+export type StorageConfig = {
+    store?: StorageDestination;
+    graphEnrich?: boolean | null;
+    dedupeThreshold?: number | null;
+};
 export type CreateMemoryInput = {
     content: string;
     pinned?: boolean;
     tags?: string[];
     ttlSeconds?: number;
     idempotencyKey?: string;
+    type?: string;
+    lang?: string;
+    importanceScore?: number;
+    recencyScore?: number;
+    source?: CapsuleSource | null;
+    acl?: CapsuleAcl | null;
+    piiFlags?: CapsulePiiFlags | null;
+    storage?: StorageConfig | null;
     subjectId?: string;
 };
 export type UpdateMemoryInput = {
@@ -19,17 +45,30 @@ export type UpdateMemoryInput = {
     pinned?: boolean;
     tags?: string[] | null;
     ttlSeconds?: number | null;
+    type?: string | null;
+    lang?: string | null;
+    importanceScore?: number | null;
+    recencyScore?: number | null;
+    source?: CapsuleSource | null;
+    acl?: CapsuleAcl | null;
+    piiFlags?: CapsulePiiFlags | null;
+    storage?: StorageConfig | null;
     subjectId?: string;
 };
 export type SearchInput = {
     query: string;
     limit?: number;
+    recipe?: string;
     subjectId?: string;
 };
 export type ListInput = {
     limit?: number;
     pinned?: boolean;
     tag?: string;
+    type?: string;
+    visibility?: CapsuleVisibility;
+    store?: StorageDestination;
+    graphEnrich?: boolean;
     subjectId?: string;
 };
 export type DeleteInput = {

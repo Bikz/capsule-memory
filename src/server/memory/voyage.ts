@@ -3,6 +3,12 @@ import { VoyageAIClient } from 'voyageai';
 
 import { EMBEDDING_DIMENSIONS } from './db';
 
+export type EmbeddingResult = {
+  embedding: number[];
+  model: string;
+  strategy: 'voyage' | 'fallback';
+};
+
 let voyageClient: VoyageAIClient | null = null;
 let missingKeyWarned = false;
 
@@ -23,10 +29,14 @@ function ensureClient(): VoyageAIClient {
   return voyageClient;
 }
 
-function buildFallbackEmbedding(text: string): number[] {
+function buildFallbackEmbedding(text: string): EmbeddingResult {
   const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
   if (!text) {
-    return vector;
+    return {
+      embedding: vector,
+      model: 'capsule-fallback-1024',
+      strategy: 'fallback'
+    };
   }
 
   for (let i = 0; i < text.length; i += 1) {
@@ -36,13 +46,17 @@ function buildFallbackEmbedding(text: string): number[] {
     vector[index] += value;
   }
 
-  return vector;
+  return {
+    embedding: vector,
+    model: 'capsule-fallback-1024',
+    strategy: 'fallback'
+  };
 }
 
 export async function generateEmbedding(
   text: string,
   inputType: 'document' | 'query' = 'document'
-): Promise<number[]> {
+): Promise<EmbeddingResult> {
   const apiKey = resolveVoyageApiKey();
   if (!apiKey) {
     if (!missingKeyWarned) {
@@ -55,9 +69,10 @@ export async function generateEmbedding(
   }
 
   const client = ensureClient();
+  const model = 'voyage-3.5';
   const { data } = await client.embed({
     input: [text],
-    model: 'voyage-3.5',
+    model,
     inputType
   });
 
@@ -65,5 +80,9 @@ export async function generateEmbedding(
     throw new Error('Voyage embedding response did not include embedding data');
   }
 
-  return data[0].embedding;
+  return {
+    embedding: data[0].embedding,
+    model,
+    strategy: 'voyage'
+  };
 }

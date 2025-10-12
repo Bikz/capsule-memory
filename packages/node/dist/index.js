@@ -50,7 +50,15 @@ export class CapsuleMemoryClient {
                 pinned: input.pinned,
                 tags: input.tags,
                 ttlSeconds: input.ttlSeconds,
-                idempotencyKey: input.idempotencyKey
+                idempotencyKey: input.idempotencyKey,
+                type: input.type,
+                lang: input.lang,
+                importanceScore: input.importanceScore,
+                recencyScore: input.recencyScore,
+                source: input.source,
+                acl: input.acl,
+                piiFlags: input.piiFlags,
+                storage: input.storage
             }),
             subjectId: input.subjectId
         });
@@ -63,6 +71,14 @@ export class CapsuleMemoryClient {
             params.set("pinned", String(input.pinned));
         if (input.tag)
             params.set("tag", input.tag);
+        if (input.type)
+            params.set("type", input.type);
+        if (input.visibility)
+            params.set("visibility", input.visibility);
+        if (input.store)
+            params.set("store", input.store);
+        if (typeof input.graphEnrich === "boolean")
+            params.set("graphEnrich", String(input.graphEnrich));
         if (input.subjectId)
             params.set("subjectId", input.subjectId);
         const qs = params.toString() ? `?${params.toString()}` : "";
@@ -71,7 +87,7 @@ export class CapsuleMemoryClient {
     async search(input) {
         return this.request("/v1/memories/search", {
             method: "POST",
-            body: JSON.stringify({ query: input.query, limit: input.limit }),
+            body: JSON.stringify({ query: input.query, limit: input.limit, recipe: input.recipe }),
             subjectId: input.subjectId
         });
     }
@@ -81,7 +97,15 @@ export class CapsuleMemoryClient {
             body: JSON.stringify({
                 pinned: input.pinned,
                 tags: input.tags,
-                ttlSeconds: input.ttlSeconds
+                ttlSeconds: input.ttlSeconds,
+                type: input.type,
+                lang: input.lang,
+                importanceScore: input.importanceScore,
+                recencyScore: input.recencyScore,
+                source: input.source,
+                acl: input.acl,
+                piiFlags: input.piiFlags,
+                storage: input.storage
             }),
             subjectId: input.subjectId
         });

@@ -8,6 +8,10 @@ dist
 build
 !packages/node/dist/
 !packages/node/dist/**
+packages/node/dist/tsconfig.tsbuildinfo
+
+# Build cache
+.modelence
 
 # Testing
 coverage

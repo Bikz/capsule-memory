@@ -7,12 +7,44 @@ export type CommonOpts = {
   fetchImpl?: typeof fetch;
 };
 
+export type CapsuleVisibility = "private" | "shared" | "public";
+
+export type CapsuleAcl = {
+  visibility: CapsuleVisibility;
+};
+
+export type CapsuleSource = {
+  app?: string;
+  connector?: string;
+  url?: string;
+  fileId?: string;
+  spanId?: string;
+};
+
+export type CapsulePiiFlags = Record<string, boolean>;
+
+export type StorageDestination = "short_term" | "long_term" | "capsule_graph";
+
+export type StorageConfig = {
+  store?: StorageDestination;
+  graphEnrich?: boolean | null;
+  dedupeThreshold?: number | null;
+};
+
 export type CreateMemoryInput = {
   content: string;
   pinned?: boolean;
   tags?: string[];
   ttlSeconds?: number;
   idempotencyKey?: string;
+  type?: string;
+  lang?: string;
+  importanceScore?: number;
+  recencyScore?: number;
+  source?: CapsuleSource | null;
+  acl?: CapsuleAcl | null;
+  piiFlags?: CapsulePiiFlags | null;
+  storage?: StorageConfig | null;
   subjectId?: string;
 };
 
@@ -21,12 +53,21 @@ export type UpdateMemoryInput = {
   pinned?: boolean;
   tags?: string[] | null;
   ttlSeconds?: number | null;
+  type?: string | null;
+  lang?: string | null;
+  importanceScore?: number | null;
+  recencyScore?: number | null;
+  source?: CapsuleSource | null;
+  acl?: CapsuleAcl | null;
+  piiFlags?: CapsulePiiFlags | null;
+  storage?: StorageConfig | null;
   subjectId?: string;
 };
 
 export type SearchInput = {
   query: string;
   limit?: number;
+  recipe?: string;
   subjectId?: string;
 };
 
@@ -34,6 +75,10 @@ export type ListInput = {
   limit?: number;
   pinned?: boolean;
   tag?: string;
+  type?: string;
+  visibility?: CapsuleVisibility;
+  store?: StorageDestination;
+  graphEnrich?: boolean;
   subjectId?: string;
 };
 
@@ -103,7 +148,15 @@ export class CapsuleMemoryClient {
         pinned: input.pinned,
         tags: input.tags,
         ttlSeconds: input.ttlSeconds,
-        idempotencyKey: input.idempotencyKey
+        idempotencyKey: input.idempotencyKey,
+        type: input.type,
+        lang: input.lang,
+        importanceScore: input.importanceScore,
+        recencyScore: input.recencyScore,
+        source: input.source,
+        acl: input.acl,
+        piiFlags: input.piiFlags,
+        storage: input.storage
       }),
       subjectId: input.subjectId
     });
@@ -114,6 +167,10 @@ export class CapsuleMemoryClient {
     if (input.limit) params.set("limit", String(input.limit));
     if (typeof input.pinned === "boolean") params.set("pinned", String(input.pinned));
     if (input.tag) params.set("tag", input.tag);
+    if (input.type) params.set("type", input.type);
+    if (input.visibility) params.set("visibility", input.visibility);
+    if (input.store) params.set("store", input.store);
+    if (typeof input.graphEnrich === "boolean") params.set("graphEnrich", String(input.graphEnrich));
     if (input.subjectId) params.set("subjectId", input.subjectId);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/v1/memories${qs}`, { method: "GET", subjectId: input.subjectId });
@@ -122,7 +179,7 @@ export class CapsuleMemoryClient {
   async search(input: SearchInput) {
     return this.request("/v1/memories/search", {
       method: "POST",
-      body: JSON.stringify({ query: input.query, limit: input.limit }),
+      body: JSON.stringify({ query: input.query, limit: input.limit, recipe: input.recipe }),
       subjectId: input.subjectId
     });
   }
@@ -133,7 +190,15 @@ export class CapsuleMemoryClient {
       body: JSON.stringify({
         pinned: input.pinned,
         tags: input.tags,
-        ttlSeconds: input.ttlSeconds
+        ttlSeconds: input.ttlSeconds,
+        type: input.type,
+        lang: input.lang,
+        importanceScore: input.importanceScore,
+        recencyScore: input.recencyScore,
+        source: input.source,
+        acl: input.acl,
+        piiFlags: input.piiFlags,
+        storage: input.storage
       }),
       subjectId: input.subjectId
     });

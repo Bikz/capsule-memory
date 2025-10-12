@@ -2,6 +2,23 @@ import { Module, ObjectId, type RouteDefinition, type RouteParams } from 'modele
 import { z } from 'zod';
 
 import { dbMemories, EMBEDDING_DIMENSIONS } from './db';
+import {
+  CapsuleAcl,
+  CapsulePiiFlags,
+  CapsuleSource,
+  CapsuleStorageState,
+  StorageDestination,
+  computeImportanceScore,
+  computeRecencyScore,
+  createProvenanceEvent,
+  resolveAcl,
+  resolveLanguage,
+  resolvePiiFlags,
+  resolveSource,
+  resolveTypeValue
+} from './meta';
+import { defaultStoragePolicies, evaluateStoragePolicies } from './policies';
+import { applyRecipeWeight, describeRecipeMatch, getSearchRecipe, listSearchRecipes } from './recipes';
 import { generateEmbedding } from './voyage';
 
 type MemoryDocument = typeof dbMemories.Doc;
@@ -17,24 +34,50 @@ type RetentionResult = {
   forgottenMemoryId: string | null;
 };
 
+type StorageConfigInput = {
+  store?: StorageDestination;
+  graphEnrich?: boolean | null;
+  dedupeThreshold?: number | null;
+};
+
 type CreateMemoryInput = {
   content: string;
   pinned?: boolean;
   tags?: string[];
   ttlSeconds?: number;
   idempotencyKey?: string;
+  type?: string;
+  lang?: string;
+  importanceScore?: number;
+  recencyScore?: number;
+  source?: CapsuleSource | null;
+  acl?: CapsuleAcl | null;
+  piiFlags?: CapsulePiiFlags | null;
+  storage?: StorageConfigInput | null;
 };
 
 type UpdateMemoryInput = {
   pinned?: boolean;
   tags?: string[] | null;
   ttlSeconds?: number | null;
+  type?: string | null;
+  lang?: string | null;
+  importanceScore?: number | null;
+  recencyScore?: number | null;
+  source?: CapsuleSource | null;
+  acl?: CapsuleAcl | null;
+  piiFlags?: CapsulePiiFlags | null;
+  storage?: StorageConfigInput | null;
 };
 
 type MemoryListFilters = {
   limit?: number;
   pinned?: boolean;
   tag?: string;
+  type?: string;
+  visibility?: CapsuleAcl['visibility'];
+  store?: StorageDestination;
+  graphEnrich?: boolean;
 };
 
 const MAX_MEMORIES = Number.parseInt(process.env.CAPSULE_MAX_MEMORIES ?? '100', 10);
@@ -51,6 +94,52 @@ const tenantArgSchema = z.object({
   subjectId: z.string().min(1, 'subjectId is required').optional()
 });
 
+const visibilitySchema = z.enum(['private', 'shared', 'public']);
+
+const sourceSchema = z
+  .object({
+    app: z.string().min(1).optional(),
+    connector: z.string().min(1).optional(),
+    url: z.string().min(1).optional(),
+    fileId: z.string().min(1).optional(),
+    spanId: z.string().min(1).optional()
+  })
+  .partial()
+  .refine((value) => Object.values(value).some((entry) => typeof entry === 'string' && entry.trim().length > 0), {
+    message: 'source must include at least one populated field'
+  });
+
+const aclSchema = z.object({
+  visibility: visibilitySchema
+});
+
+const storageDestinationSchema = z.enum(['short_term', 'long_term', 'capsule_graph']);
+
+const storageInputSchema = z
+  .object({
+    store: storageDestinationSchema.nullish(),
+    graphEnrich: z.boolean().nullish(),
+    dedupeThreshold: z.number().min(0).max(1).nullish()
+  })
+  .nullish();
+
+const recipeNameSchema = z.enum([
+  'default-semantic',
+  'conversation-memory',
+  'knowledge-qa',
+  'audit-trace'
+]);
+
+const metadataCreateFields = {
+  type: z.string().min(1).nullish(),
+  lang: z.string().min(2).max(8).nullish(),
+  importanceScore: z.number().min(0).max(5).nullish(),
+  recencyScore: z.number().min(0).max(5).nullish(),
+  source: sourceSchema.nullish(),
+  acl: aclSchema.nullish(),
+  piiFlags: z.record(z.string(), z.boolean()).nullish()
+};
+
 const createMemorySchema = tenantArgSchema.extend({
   content: z.string().min(1),
   pinned: z.boolean().optional(),
@@ -61,7 +150,9 @@ const createMemorySchema = tenantArgSchema.extend({
     .positive()
     .max(60 * 60 * 24 * 365, 'ttlSeconds must be less than or equal to one year in seconds')
     .optional(),
-  idempotencyKey: z.string().min(1).max(128).optional()
+  idempotencyKey: z.string().min(1).max(128).optional(),
+  ...metadataCreateFields,
+  storage: storageInputSchema
 });
 
 const updateMemorySchema = tenantArgSchema.extend({
@@ -74,7 +165,9 @@ const updateMemorySchema = tenantArgSchema.extend({
     .nonnegative()
     .max(60 * 60 * 24 * 365)
     .nullable()
-    .optional()
+    .optional(),
+  ...metadataCreateFields,
+  storage: storageInputSchema
 });
 
 const pinMemorySchema = tenantArgSchema.extend({
@@ -85,12 +178,17 @@ const pinMemorySchema = tenantArgSchema.extend({
 const listMemoriesSchema = tenantArgSchema.extend({
   limit: z.number().int().positive().max(200).optional(),
   pinned: z.boolean().optional(),
-  tag: z.string().min(1).optional()
+  tag: z.string().min(1).optional(),
+  type: z.string().min(1).optional(),
+  visibility: visibilitySchema.optional(),
+  store: storageDestinationSchema.optional(),
+  graphEnrich: z.boolean().optional()
 });
 
 const searchMemorySchema = tenantArgSchema.extend({
   query: z.string().min(1),
-  limit: z.number().int().positive().max(50).optional()
+  limit: z.number().int().positive().max(50).optional(),
+  recipe: recipeNameSchema.optional()
 });
 
 const deleteMemorySchema = tenantArgSchema.extend({
@@ -185,10 +283,55 @@ function cosineSimilarity(
 }
 
 function toClientMemory(doc: MemoryDocument) {
-  const { embedding, embeddingNorm, _id, ...rest } = doc;
+  const { embedding, embeddingNorm, _id, ...rest } = doc as MemoryDocument & {
+    embeddingModel?: string;
+    provenance?: unknown;
+    lang?: string;
+    importanceScore?: number;
+    recencyScore?: number;
+    acl?: CapsuleAcl;
+  };
+  const pinnedValue = (rest as { pinned: boolean }).pinned;
+  const importanceScore =
+    typeof rest.importanceScore === 'number'
+      ? rest.importanceScore
+      : computeImportanceScore(pinnedValue);
+  const recencyScore =
+    typeof rest.recencyScore === 'number'
+      ? rest.recencyScore
+      : computeRecencyScore();
+  const aclValue = rest.acl ?? resolveAcl(null);
+  const langValue =
+    typeof rest.lang === 'string' && rest.lang
+      ? rest.lang
+      : resolveLanguage((rest as { content: string }).content ?? '', null);
+  const provenanceValue = Array.isArray(rest.provenance) ? rest.provenance : [];
+  const embeddingModelValue =
+    typeof rest.embeddingModel === 'string' && rest.embeddingModel
+      ? rest.embeddingModel
+      : 'unknown';
+  const storageValue: CapsuleStorageState =
+    rest.storage && typeof rest.storage === 'object'
+      ? (rest.storage as CapsuleStorageState)
+      : {
+          store: 'long_term',
+          policies: []
+        };
+  const graphEnrichValue =
+    typeof (rest as { graphEnrich?: unknown }).graphEnrich === 'boolean'
+      ? (rest as { graphEnrich?: boolean }).graphEnrich
+      : storageValue.graphEnrich ?? false;
   return {
     id: _id.toString(),
-    ...rest
+    ...rest,
+    lang: langValue,
+    importanceScore,
+    recencyScore,
+    acl: aclValue,
+    provenance: provenanceValue,
+    embeddingModel: embeddingModelValue,
+    storage: storageValue,
+    graphEnrich: graphEnrichValue
   };
 }
 
@@ -206,6 +349,17 @@ function sanitizeTags(tags?: string[] | null): string[] | undefined {
   }
   const unique = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
   return unique.length > 0 ? unique : undefined;
+}
+
+function sanitizeLanguageOverride(lang?: string | null): string | undefined {
+  if (lang === null || lang === undefined) {
+    return undefined;
+  }
+  const trimmed = lang.trim().toLowerCase();
+  if (trimmed.length < 2 || trimmed.length > 8) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 function computeExpirationDate(createdAt: Date, ttlSeconds?: number | null): Date | undefined {
@@ -264,25 +418,103 @@ async function createMemory(
     }
   }
 
-  const rawEmbedding = await generateEmbedding(content, 'document');
-  const { embedding, norm } = normalizeEmbedding(rawEmbedding);
+  const embeddingResult = await generateEmbedding(content, 'document');
+  const { embedding, norm } = normalizeEmbedding(embeddingResult.embedding);
 
   const createdAt = new Date();
-  const expiresAt = computeExpirationDate(createdAt, ttlSeconds);
   const pinnedValue = pinned ?? false;
   const sanitizedTags = sanitizeTags(tags);
+  const langValue = resolveLanguage(content, input.lang ?? null);
+  const typeValue = resolveTypeValue(input.type ?? null);
+  const sourceValue = resolveSource(input.source ?? undefined);
+  const aclValue = resolveAcl(input.acl ?? null);
+  const piiFlagsValue = resolvePiiFlags(input.piiFlags ?? undefined);
+
+  const policyContext = {
+    type: typeValue,
+    source: sourceValue,
+    tags: sanitizedTags,
+    pinned: pinnedValue
+  };
+  const policyResult = evaluateStoragePolicies(policyContext, defaultStoragePolicies);
+
+  const storageInput = input.storage ?? null;
+  const userTtlSeconds = typeof ttlSeconds === 'number' && ttlSeconds > 0 ? ttlSeconds : undefined;
+  const policyTtlSeconds = policyResult.ttlSeconds;
+  const finalTtlSeconds =
+    userTtlSeconds !== undefined
+      ? userTtlSeconds
+      : policyTtlSeconds === null
+        ? undefined
+        : policyTtlSeconds;
+  const expiresAt = computeExpirationDate(createdAt, finalTtlSeconds);
+
+  const policiesApplied = [...policyResult.appliedPolicies];
+  if (storageInput) {
+    policiesApplied.push('manual-override');
+  }
+
+  const finalStore: StorageDestination = storageInput?.store ?? policyResult.store ?? 'long_term';
+  const dedupeOverride = storageInput?.dedupeThreshold;
+  const dedupeThreshold =
+    dedupeOverride === null
+      ? undefined
+      : typeof dedupeOverride === 'number'
+        ? dedupeOverride
+        : policyResult.dedupeThreshold;
+
+  const graphOverride = storageInput?.graphEnrich ?? undefined;
+  const graphEnrichValue =
+    graphOverride === null
+      ? false
+      : typeof graphOverride === 'boolean'
+        ? graphOverride
+        : policyResult.graphEnrich ?? false;
+
+  const importanceScore = computeImportanceScore(
+    pinnedValue,
+    input.importanceScore ?? policyResult.importanceScore
+  );
+  const recencyScore = computeRecencyScore(input.recencyScore ?? undefined);
+  const provenance = [
+    createProvenanceEvent({
+      event: 'created',
+      actor: scope.subjectId,
+      description: 'Memory created via Capsule Memory API'
+    })
+  ];
+
+  const storageState: CapsuleStorageState = {
+    store: finalStore,
+    policies: policiesApplied,
+    graphEnrich: graphEnrichValue,
+    ...(typeof dedupeThreshold === 'number' ? { dedupeThreshold } : {})
+  };
 
   const doc = {
     ...filter,
     content,
+    lang: langValue,
     embedding,
     embeddingNorm: norm,
+    embeddingModel: embeddingResult.model,
     createdAt,
+    updatedAt: createdAt,
     pinned: pinnedValue,
+    importanceScore,
+    recencyScore,
+    acl: aclValue,
+    provenance,
+    storage: storageState,
+    graphEnrich: graphEnrichValue,
+    explanation: 'Memory added via Capsule Memory.',
     ...(sanitizedTags ? { tags: sanitizedTags } : {}),
+    ...(finalTtlSeconds !== undefined ? { ttlSeconds: finalTtlSeconds } : {}),
     ...(expiresAt ? { expiresAt } : {}),
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-    explanation: 'Memory added via Capsule Memory.'
+    ...(typeValue ? { type: typeValue } : {}),
+    ...(sourceValue ? { source: sourceValue } : {}),
+    ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {})
   };
 
   const { insertedId } = await dbMemories.insertOne(doc);
@@ -293,10 +525,23 @@ async function createMemory(
     id: insertedId.toString(),
     ...filter,
     content,
+    lang: langValue,
     createdAt,
+    updatedAt: createdAt,
     pinned: pinnedValue,
+    importanceScore,
+    recencyScore,
+    acl: aclValue,
+    provenance,
+    embeddingModel: embeddingResult.model,
+    storage: storageState,
+    graphEnrich: graphEnrichValue,
     ...(sanitizedTags ? { tags: sanitizedTags } : {}),
+    ...(finalTtlSeconds !== undefined ? { ttlSeconds: finalTtlSeconds } : {}),
     ...(expiresAt ? { expiresAt } : {}),
+    ...(typeValue ? { type: typeValue } : {}),
+    ...(sourceValue ? { source: sourceValue } : {}),
+    ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {}),
     explanation: retention.explanation,
     forgottenMemoryId: retention.forgottenMemoryId
   };
@@ -306,7 +551,7 @@ async function listMemories(
   scope: TenantScope,
   filters: MemoryListFilters
 ): Promise<{ items: ReturnType<typeof toClientMemory>[]; explanation: string }> {
-  const { limit, pinned, tag } = filters;
+  const { limit, pinned, tag, type, visibility, store, graphEnrich } = filters;
   const query: Record<string, unknown> = { ...memoryScopeFilter(scope) };
 
   if (typeof pinned === 'boolean') {
@@ -317,8 +562,24 @@ async function listMemories(
     query.tags = tag;
   }
 
+  if (type) {
+    query.type = type;
+  }
+
+  if (visibility) {
+    query['acl.visibility'] = visibility;
+  }
+
+  if (store) {
+    query['storage.store'] = store;
+  }
+
+  if (typeof graphEnrich === 'boolean') {
+    query.graphEnrich = graphEnrich;
+  }
+
   const memories = await dbMemories.fetch(query, {
-    sort: { pinned: -1, createdAt: -1 },
+    sort: { pinned: -1, importanceScore: -1, recencyScore: -1, createdAt: -1 },
     limit: limit ?? 50
   });
 
@@ -331,88 +592,309 @@ async function listMemories(
 async function searchMemories(
   scope: TenantScope,
   queryString: string,
-  limit?: number
+  options?: { limit?: number; recipe?: string }
 ): Promise<{
   query: string;
-  results: Array<ReturnType<typeof toClientMemory> & { score: number }>;
+  results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number }>;
+  recipe: string;
   explanation: string;
 }> {
-  const queryEmbedding = normalizeEmbedding(await generateEmbedding(queryString, 'query'));
+  const recipe = getSearchRecipe(options?.recipe);
+  const explicitLimit = options?.limit;
+  const limitValue = explicitLimit && explicitLimit > 0 ? explicitLimit : recipe.limit;
+  const candidateLimit = Math.max(recipe.candidateLimit, limitValue * 5);
 
-  const candidates = await dbMemories.fetch(memoryScopeFilter(scope), {
+  const queryEmbeddingResult = await generateEmbedding(queryString, 'query');
+  const queryEmbedding = normalizeEmbedding(queryEmbeddingResult.embedding);
+
+  const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope) };
+  if (recipe.filters?.pinnedOnly) {
+    fetchFilter.pinned = true;
+  }
+  if (typeof recipe.filters?.graphEnrich === 'boolean') {
+    fetchFilter.graphEnrich = recipe.filters.graphEnrich;
+  }
+  if (recipe.filters?.types && recipe.filters.types.length > 0) {
+    fetchFilter.type = { $in: recipe.filters.types };
+  }
+
+  const candidates = await dbMemories.fetch(fetchFilter, {
     sort: { createdAt: -1 },
-    limit: 500
+    limit: candidateLimit
   });
 
   const results = candidates
-    .map((doc) => ({
-      doc,
-      score: cosineSimilarity(
+    .map((doc) => {
+      const semanticScore = cosineSimilarity(
         queryEmbedding.embedding,
         queryEmbedding.norm,
         doc.embedding,
         doc.embeddingNorm
-      )
-    }))
-    .filter((entry) => Number.isFinite(entry.score))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit ?? 10)
-    .map(({ doc, score }) => ({
+      );
+      const weightedScore = applyRecipeWeight(
+        semanticScore,
+        {
+          pinned: doc.pinned,
+          importanceScore: doc.importanceScore,
+          recencyScore: doc.recencyScore,
+          storage: doc.storage
+        },
+        recipe.scoring
+      );
+      return {
+        doc,
+        semanticScore,
+        weightedScore
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.weightedScore))
+    .sort((a, b) => b.weightedScore - a.weightedScore)
+    .slice(0, limitValue)
+    .map(({ doc, weightedScore, semanticScore }) => ({
       ...toClientMemory(doc),
-      score
+      score: semanticScore,
+      recipeScore: weightedScore
     }));
+
+  const explanation =
+    `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
+    `item(s).`;
 
   return {
     query: queryString,
     results,
-    explanation: `Found ${results.length} memory item(s) using semantic similarity.`
+    recipe: recipe.name,
+    explanation
   };
 }
 
 async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id: string }) {
-  const { id, pinned, tags, ttlSeconds } = input;
+  const {
+    id,
+    pinned,
+    tags,
+    ttlSeconds,
+    type,
+    lang,
+    importanceScore,
+    recencyScore,
+    source,
+    acl,
+    piiFlags,
+    storage
+  } = input;
+
+  const objectId = toObjectId(id);
+  let existingDocForStorage: MemoryDocument | null = null;
+  if (storage !== undefined) {
+    existingDocForStorage = await dbMemories.findOne({
+      _id: objectId,
+      ...memoryScopeFilter(scope)
+    });
+    if (!existingDocForStorage) {
+      throw new Error('Memory not found.');
+    }
+  }
+
   const update: Record<string, unknown> = {};
-  const unset: Record<string, unknown> = {};
+  const unset: Record<string, '' | 1 | true> = {};
+  const push: Record<string, unknown> = {};
+  const response: Record<string, unknown> = {};
+  let mutated = false;
 
   if (typeof pinned === 'boolean') {
     update.pinned = pinned;
+    response.pinned = pinned;
+    mutated = true;
   }
 
   if (tags !== undefined) {
     const sanitized = sanitizeTags(tags);
     if (sanitized) {
       update.tags = sanitized;
+      response.tags = sanitized;
     } else {
       unset.tags = '';
+      response.tags = [];
     }
+    mutated = true;
   }
 
   if (ttlSeconds !== undefined) {
-    if (ttlSeconds === null) {
+    mutated = true;
+    if (ttlSeconds === null || ttlSeconds <= 0) {
       unset.expiresAt = '';
+      unset.ttlSeconds = '';
+      response.ttlSeconds = null;
+      response.expiresAt = null;
     } else {
-      const baseDate = new Date();
-      const expiresAt = computeExpirationDate(baseDate, ttlSeconds);
+      const ttlValue = ttlSeconds;
+      const expiresAt = computeExpirationDate(new Date(), ttlValue);
       if (expiresAt) {
         update.expiresAt = expiresAt;
+        update.ttlSeconds = ttlValue;
+        response.ttlSeconds = ttlValue;
+        response.expiresAt = expiresAt;
       } else {
         unset.expiresAt = '';
+        unset.ttlSeconds = '';
+        response.ttlSeconds = null;
+        response.expiresAt = null;
       }
     }
   }
 
-  if (Object.keys(update).length === 0 && Object.keys(unset).length === 0) {
+  if (type !== undefined) {
+    mutated = true;
+    const typeValue = resolveTypeValue(type);
+    if (typeValue) {
+      update.type = typeValue;
+      response.type = typeValue;
+    } else {
+      unset.type = '';
+      response.type = null;
+    }
+  }
+
+  if (lang !== undefined) {
+    mutated = true;
+    if (lang === null) {
+      unset.lang = '';
+      response.lang = null;
+    } else {
+      const langValue = sanitizeLanguageOverride(lang);
+      if (langValue) {
+        update.lang = langValue;
+        response.lang = langValue;
+      } else {
+        unset.lang = '';
+        response.lang = null;
+      }
+    }
+  }
+
+  if (importanceScore !== undefined || typeof pinned === 'boolean') {
+    mutated = true;
+    const computedImportance = computeImportanceScore(
+      typeof pinned === 'boolean' ? pinned : undefined,
+      importanceScore ?? undefined
+    );
+    update.importanceScore = computedImportance;
+    response.importanceScore = computedImportance;
+  }
+
+  if (recencyScore !== undefined) {
+    mutated = true;
+    const computedRecency = computeRecencyScore(recencyScore ?? undefined);
+    update.recencyScore = computedRecency;
+    response.recencyScore = computedRecency;
+  }
+
+  if (source !== undefined) {
+    mutated = true;
+    const resolvedSource = resolveSource(source ?? undefined);
+    if (resolvedSource) {
+      update.source = resolvedSource;
+      response.source = resolvedSource;
+    } else {
+      unset.source = '';
+      response.source = null;
+    }
+  }
+
+  if (acl !== undefined) {
+    mutated = true;
+    const resolvedAcl = resolveAcl(acl ?? null);
+    update.acl = resolvedAcl;
+    response.acl = resolvedAcl;
+  }
+
+  if (piiFlags !== undefined) {
+    mutated = true;
+    const resolvedFlags = resolvePiiFlags(piiFlags ?? undefined);
+    if (resolvedFlags) {
+      update.piiFlags = resolvedFlags;
+      response.piiFlags = resolvedFlags;
+    } else {
+      unset.piiFlags = '';
+      response.piiFlags = {};
+    }
+  }
+
+  if (storage !== undefined) {
+    mutated = true;
+    if (storage === null) {
+      unset.storage = '';
+      update.graphEnrich = false;
+      response.storage = null;
+      response.graphEnrich = false;
+    } else {
+      const existingPolicies = Array.isArray(existingDocForStorage?.storage?.policies)
+        ? existingDocForStorage?.storage?.policies ?? []
+        : [];
+      const mergedPolicies = Array.from(new Set([...existingPolicies, 'manual-override']));
+
+      const storeValue: StorageDestination =
+        storage.store ?? existingDocForStorage?.storage?.store ?? 'long_term';
+
+      const dedupeOverride = storage.dedupeThreshold;
+      const dedupeValue =
+        dedupeOverride === null
+          ? undefined
+          : typeof dedupeOverride === 'number'
+            ? dedupeOverride
+            : existingDocForStorage?.storage?.dedupeThreshold;
+
+      const graphOverride = storage.graphEnrich ?? undefined;
+      let graphEnrichValue: boolean;
+      if (graphOverride === null) {
+        graphEnrichValue = false;
+      } else if (typeof graphOverride === 'boolean') {
+        graphEnrichValue = graphOverride;
+      } else if (typeof existingDocForStorage?.graphEnrich === 'boolean') {
+        graphEnrichValue = existingDocForStorage.graphEnrich;
+      } else if (typeof existingDocForStorage?.storage?.graphEnrich === 'boolean') {
+        graphEnrichValue = existingDocForStorage.storage.graphEnrich;
+      } else {
+        graphEnrichValue = false;
+      }
+
+      const storageUpdate: CapsuleStorageState = {
+        store: storeValue,
+        policies: mergedPolicies,
+        graphEnrich: graphEnrichValue,
+        ...(typeof dedupeValue === 'number' ? { dedupeThreshold: dedupeValue } : {})
+      };
+
+      update.storage = storageUpdate;
+      update.graphEnrich = graphEnrichValue;
+      response.storage = storageUpdate;
+      response.graphEnrich = graphEnrichValue;
+    }
+  }
+
+  if (!mutated) {
     return {
       success: true,
       explanation: 'No changes applied.'
     };
   }
 
+  update.updatedAt = new Date();
+  response.updatedAt = update.updatedAt;
+
+  push.provenance = createProvenanceEvent({
+    event: 'updated',
+    actor: scope.subjectId,
+    description: 'Memory metadata updated'
+  });
+
   const result = await dbMemories.updateOne(
-    { _id: toObjectId(id), ...memoryScopeFilter(scope) },
+    { _id: objectId, ...memoryScopeFilter(scope) },
     {
       ...(Object.keys(update).length > 0 ? { $set: update } : {}),
-      ...(Object.keys(unset).length > 0 ? { $unset: unset } : {})
+      ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+      ...(Object.keys(push).length > 0 ? { $push: push } : {})
     }
   );
 
@@ -423,7 +905,7 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   return {
     success: true,
     explanation: 'Memory metadata updated.',
-    ...(typeof pinned === 'boolean' ? { pinned } : {})
+    ...response
   };
 }
 
@@ -539,7 +1021,15 @@ const apiRoutes: RouteDefinition[] = [
             typeof query.pinned === 'string'
               ? query.pinned === 'true'
               : undefined,
-          tag: typeof query.tag === 'string' ? query.tag : undefined
+          tag: typeof query.tag === 'string' ? query.tag : undefined,
+          type: typeof query.type === 'string' ? query.type : undefined,
+          visibility:
+            typeof query.visibility === 'string' ? query.visibility : undefined,
+          store: typeof query.store === 'string' ? query.store : undefined,
+          graphEnrich:
+            typeof query.graphEnrich === 'string'
+              ? query.graphEnrich === 'true'
+              : undefined
         });
 
         const tenant = ensureTenant(parsed, { allowFallback: false });
@@ -584,9 +1074,18 @@ const apiRoutes: RouteDefinition[] = [
           subjectId: scope.subjectId
         });
         const tenant = ensureTenant(parsed, { allowFallback: false });
-        const result = await searchMemories(tenant, parsed.query, parsed.limit);
+        const result = await searchMemories(tenant, parsed.query, {
+          limit: parsed.limit,
+          recipe: parsed.recipe
+        });
         return buildResponse(result);
       })
+    }
+  },
+  {
+    path: '/v1/memories/recipes',
+    handlers: {
+      get: withAuth(async () => buildResponse({ recipes: listSearchRecipes() }))
     }
   },
   {
@@ -663,17 +1162,26 @@ export default new Module('memory', {
 
       try {
         const tenant = ensureTenant(parsed, { allowFallback: true });
-        return await searchMemories(tenant, parsed.query, parsed.limit);
+        return await searchMemories(tenant, parsed.query, {
+          limit: parsed.limit,
+          recipe: parsed.recipe
+        });
       } catch (error) {
         if (isProvisioningError(error)) {
           return {
             query: parsed.query,
             results: [],
+            recipe: parsed.recipe ?? 'default-semantic',
             explanation: PROVISIONING_HINT
           };
         }
         throw error;
       }
+    },
+    listSearchRecipes() {
+      return {
+        recipes: listSearchRecipes()
+      };
     }
   },
   mutations: {
