@@ -22,6 +22,7 @@ export const dbMemories = new Store('memories', {
     tags: schema.array(schema.string()).optional(),
     expiresAt: schema.date().optional(),
     idempotencyKey: schema.string().optional(),
+    retention: schema.enum(['irreplaceable', 'permanent', 'replaceable', 'ephemeral']).optional(),
     source: schema
       .object({
         app: schema.string().optional(),
@@ -76,6 +77,7 @@ export const dbMemories = new Store('memories', {
     { key: { orgId: 1, projectId: 1, 'acl.visibility': 1, createdAt: -1 } },
     { key: { orgId: 1, projectId: 1, tags: 1 } },
     { key: { orgId: 1, projectId: 1, 'storage.store': 1, createdAt: -1 } },
-    { key: { orgId: 1, projectId: 1, graphEnrich: 1, createdAt: -1 } }
+    { key: { orgId: 1, projectId: 1, graphEnrich: 1, createdAt: -1 } },
+    { key: { orgId: 1, projectId: 1, retention: 1, createdAt: -1 } }
   ]
 });

@@ -25,7 +25,8 @@
     "local:bundle": "node tools/capsule-local-bundle.mjs",
     "eval:retrieval": "tsx src/tools/evaluateRetrieval.ts",
     "local:manifest": "node tools/capsule-local-manifest.mjs",
-    "check:pii": "node tools/pii-policy-check.mjs"
+    "check:pii": "node tools/pii-policy-check.mjs",
+    "eval:capture": "tsx src/tools/evaluateCapture.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",

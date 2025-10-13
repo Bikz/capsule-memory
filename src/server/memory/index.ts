@@ -8,15 +8,21 @@ import {
   CapsulePiiFlags,
   CapsuleSource,
   CapsuleStorageState,
+  CapsuleRetention,
   StorageDestination,
+  DEFAULT_RETENTION,
+  EPHEMERAL_TTL_DEFAULT_SECONDS,
   computeImportanceScore,
   computeRecencyScore,
   createProvenanceEvent,
+  isRetentionProtected,
   resolveAcl,
   resolveLanguage,
   resolvePiiFlags,
+  resolveRetention,
   resolveSource,
-  resolveTypeValue
+  resolveTypeValue,
+  retentionPriority
 } from './meta';
 import {
   defaultStoragePolicies,
@@ -54,7 +60,7 @@ type RetentionResult = {
 };
 
 type StorageConfigInput = {
-  store?: StorageDestination;
+  store?: StorageDestination | null;
   graphEnrich?: boolean | null;
   dedupeThreshold?: number | null;
 };
@@ -73,6 +79,7 @@ type CreateMemoryInput = {
   acl?: CapsuleAcl | null;
   piiFlags?: CapsulePiiFlags | null;
   storage?: StorageConfigInput | null;
+  retention?: CapsuleRetention | null;
 };
 
 type UpdateMemoryInput = {
@@ -87,6 +94,7 @@ type UpdateMemoryInput = {
   acl?: CapsuleAcl | null;
   piiFlags?: CapsulePiiFlags | null;
   storage?: StorageConfigInput | null;
+  retention?: CapsuleRetention | null;
 };
 
 type MemoryListFilters = {
@@ -97,6 +105,7 @@ type MemoryListFilters = {
   visibility?: CapsuleAcl['visibility'];
   store?: StorageDestination;
   graphEnrich?: boolean;
+  retention?: CapsuleRetention;
 };
 
 const MAX_MEMORIES = Number.parseInt(process.env.CAPSULE_MAX_MEMORIES ?? '100', 10);
@@ -186,6 +195,8 @@ const policyPreviewSchema = tenantArgSchema.extend({
   acl: aclSchema.nullish()
 });
 
+const retentionSchema = z.enum(['irreplaceable', 'permanent', 'replaceable', 'ephemeral']);
+
 const metadataCreateFields = {
   type: z.string().min(1).nullish(),
   lang: z.string().min(2).max(8).nullish(),
@@ -193,7 +204,8 @@ const metadataCreateFields = {
   recencyScore: z.number().min(0).max(5).nullish(),
   source: sourceSchema.nullish(),
   acl: aclSchema.nullish(),
-  piiFlags: z.record(z.string(), z.boolean()).nullish()
+  piiFlags: z.record(z.string(), z.boolean()).nullish(),
+  retention: retentionSchema.nullish()
 };
 
 const createMemorySchema = tenantArgSchema.extend({
@@ -238,7 +250,8 @@ const listMemoriesSchema = tenantArgSchema.extend({
   type: z.string().min(1).optional(),
   visibility: visibilitySchema.optional(),
   store: storageDestinationSchema.optional(),
-  graphEnrich: z.boolean().optional()
+  graphEnrich: z.boolean().optional(),
+  retention: retentionSchema.optional()
 });
 
 const searchMemorySchema = tenantArgSchema.extend({
@@ -421,6 +434,8 @@ function toClientMemory(doc: MemoryDocument, options?: { byokKey?: string }) {
     typeof rest.embeddingModel === 'string' && rest.embeddingModel
       ? rest.embeddingModel
       : 'unknown';
+  const retentionValue: CapsuleRetention =
+    (rest as { retention?: CapsuleRetention }).retention ?? DEFAULT_RETENTION;
   const storageValue: CapsuleStorageState =
     rest.storage && typeof rest.storage === 'object'
       ? (rest.storage as CapsuleStorageState)
@@ -447,6 +462,7 @@ function toClientMemory(doc: MemoryDocument, options?: { byokKey?: string }) {
     embeddingModel: embeddingModelValue,
     storage: storageValue,
     graphEnrich: graphEnrichValue,
+    retention: retentionValue,
     ...(piiFlagsValue ? { piiFlags: piiFlagsValue } : {})
   };
 }
@@ -783,23 +799,53 @@ async function applyRetentionPolicy(scope: TenantScope): Promise<RetentionResult
     };
   }
 
-  const oldest = await dbMemories.findOne(
-    { ...filter, pinned: false },
-    { sort: { createdAt: 1 } }
-  );
+  const candidates = await dbMemories
+    .fetch(
+      { ...filter, pinned: false },
+      { sort: { createdAt: 1 }, limit: 200 }
+    )
+    .catch(() => [] as MemoryDocument[]);
 
-  if (!oldest) {
+  let selected: MemoryDocument | null = null;
+  for (const candidate of candidates) {
+    const retentionValue: CapsuleRetention = (candidate as { retention?: CapsuleRetention }).retention ?? DEFAULT_RETENTION;
+    if (isRetentionProtected(retentionValue)) {
+      continue;
+    }
+    if (!selected) {
+      selected = candidate;
+      continue;
+    }
+    const currentPriority = retentionPriority(retentionValue);
+    const chosenPriority = retentionPriority(
+      ((selected as { retention?: CapsuleRetention }).retention ?? DEFAULT_RETENTION) as CapsuleRetention
+    );
+    if (currentPriority < chosenPriority) {
+      selected = candidate;
+      continue;
+    }
+    if (
+      currentPriority === chosenPriority &&
+      candidate.createdAt < selected.createdAt
+    ) {
+      selected = candidate;
+    }
+  }
+
+  if (!selected) {
     return {
       explanation: 'Memory saved but no eviction candidate was found.',
       forgottenMemoryId: null
     };
   }
 
-  await dbMemories.deleteOne({ _id: oldest._id });
+  await dbMemories.deleteOne({ _id: selected._id });
+
+  const retentionDescriptor = ((selected as { retention?: CapsuleRetention }).retention ?? DEFAULT_RETENTION) as CapsuleRetention;
 
   return {
-    explanation: `Memory limit exceeded. Automatically removed the oldest unpinned memory (ID: ${oldest._id.toString()}).`,
-    forgottenMemoryId: oldest._id.toString()
+    explanation: `Memory limit exceeded. Automatically removed ${retentionDescriptor} memory (ID: ${selected._id.toString()}).`,
+    forgottenMemoryId: selected._id.toString()
   };
 }
 
@@ -807,7 +853,7 @@ async function createMemory(
   scope: TenantScope,
   input: CreateMemoryInput
 ): Promise<ReturnType<typeof toClientMemory> & RetentionResult> {
-  const { content, pinned, tags, ttlSeconds, idempotencyKey } = input;
+  const { content, pinned, tags, ttlSeconds, idempotencyKey, retention: retentionInput } = input;
   const filter = memoryScopeFilter(scope);
 
   if (idempotencyKey) {
@@ -851,12 +897,35 @@ async function createMemory(
   const storageInput = input.storage ?? null;
   const userTtlSeconds = typeof ttlSeconds === 'number' && ttlSeconds > 0 ? ttlSeconds : undefined;
   const policyTtlSeconds = policyResult.ttlSeconds;
-  const finalTtlSeconds =
+  let finalTtlSeconds =
     userTtlSeconds !== undefined
       ? userTtlSeconds
       : policyTtlSeconds === null
         ? undefined
         : policyTtlSeconds;
+
+  let { retention: retentionValue, autoAssigned: retentionAutoAssigned } = resolveRetention({
+    provided: retentionInput ?? null,
+    pinned: pinnedValue,
+    ttlSeconds: finalTtlSeconds ?? userTtlSeconds ?? null
+  });
+
+  if (retentionAutoAssigned) {
+    const reevaluated = resolveRetention({
+      provided: null,
+      pinned: pinnedValue,
+      ttlSeconds: finalTtlSeconds ?? null
+    });
+    retentionValue = reevaluated.retention;
+    retentionAutoAssigned = retentionAutoAssigned || reevaluated.autoAssigned;
+  }
+
+  if (isRetentionProtected(retentionValue)) {
+    finalTtlSeconds = undefined;
+  } else if (retentionValue === 'ephemeral' && finalTtlSeconds === undefined) {
+    finalTtlSeconds = EPHEMERAL_TTL_DEFAULT_SECONDS;
+  }
+
   const expiresAt = computeExpirationDate(createdAt, finalTtlSeconds);
 
   const policiesApplied = [...policyResult.appliedPolicies];
@@ -911,7 +980,9 @@ async function createMemory(
     type: typeValue,
     tags: sanitizedTags,
     source: sourceValue,
-    acl: aclValue
+    acl: aclValue,
+    retention: retentionValue,
+    retentionAutoAssigned
   });
 
   const doc = {
@@ -932,6 +1003,7 @@ async function createMemory(
     provenance,
     storage: storageState,
     graphEnrich: graphEnrichValue,
+    retention: retentionValue,
     explanation: 'Memory added via Capsule Memory.',
     ...(sanitizedTags ? { tags: sanitizedTags } : {}),
     ...(finalTtlSeconds !== undefined ? { ttlSeconds: finalTtlSeconds } : {}),
@@ -976,6 +1048,7 @@ async function createMemory(
     embeddingModel: embeddingResult.model,
     storage: storageState,
     graphEnrich: graphEnrichValue,
+    retention: retentionValue,
     ...(sanitizedTags ? { tags: sanitizedTags } : {}),
     ...(finalTtlSeconds !== undefined ? { ttlSeconds: finalTtlSeconds } : {}),
     ...(expiresAt ? { expiresAt } : {}),
@@ -995,7 +1068,7 @@ async function listMemories(
   scope: TenantScope,
   filters: MemoryListFilters
 ): Promise<{ items: ReturnType<typeof toClientMemory>[]; explanation: string }> {
-  const { limit, pinned, tag, type, visibility, store, graphEnrich } = filters;
+  const { limit, pinned, tag, type, visibility, store, graphEnrich, retention } = filters;
   const query: Record<string, unknown> = { ...memoryScopeFilter(scope, { includeSubject: false }) };
 
   if (typeof pinned === 'boolean') {
@@ -1020,6 +1093,10 @@ async function listMemories(
 
   if (typeof graphEnrich === 'boolean') {
     query.graphEnrich = graphEnrich;
+  }
+
+  if (retention) {
+    query.retention = retention;
   }
 
   const memories = await dbMemories.fetch(query, {
@@ -1140,20 +1217,18 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
     source,
     acl,
     piiFlags,
-    storage
+    storage,
+    retention
   } = input;
 
   const objectId = toObjectId(id);
-  const needsExistingDoc = storage !== undefined || acl !== undefined || piiFlags !== undefined;
-  let existingDoc: MemoryDocument | null = null;
-  if (needsExistingDoc) {
-    existingDoc = await dbMemories.findOne({
-      _id: objectId,
-      ...memoryScopeFilter(scope)
-    });
-    if (!existingDoc) {
-      throw new Error('Memory not found.');
-    }
+  const existingDoc = await dbMemories.findOne({
+    _id: objectId,
+    ...memoryScopeFilter(scope)
+  });
+
+  if (!existingDoc) {
+    throw new Error('Memory not found.');
   }
 
   const update: Record<string, unknown> = {};
@@ -1162,12 +1237,23 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   const response: Record<string, unknown> = {};
   let mutated = false;
   let shouldEnqueueGraphJob = false;
+  const existingRetention: CapsuleRetention = (existingDoc.retention as CapsuleRetention) ?? DEFAULT_RETENTION;
+  let retentionValue: CapsuleRetention = existingRetention;
+  let retentionMutated = false;
+  let ttlSecondsResult =
+    typeof existingDoc.ttlSeconds === 'number' && Number.isFinite(existingDoc.ttlSeconds)
+      ? existingDoc.ttlSeconds
+      : undefined;
+  let expiresAtResult = existingDoc.expiresAt ? new Date(existingDoc.expiresAt) : null;
+  const createdAtReference = existingDoc.createdAt ? new Date(existingDoc.createdAt) : new Date();
 
   if (typeof pinned === 'boolean') {
     update.pinned = pinned;
     response.pinned = pinned;
     mutated = true;
   }
+
+  const pinnedValue = typeof pinned === 'boolean' ? pinned : existingDoc.pinned;
 
   if (tags !== undefined) {
     const sanitized = sanitizeTags(tags);
@@ -1181,29 +1267,105 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
     mutated = true;
   }
 
+  if (retention !== undefined) {
+    const ttlContext =
+      ttlSeconds === null
+        ? null
+        : typeof ttlSeconds === 'number'
+          ? ttlSeconds
+          : ttlSecondsResult;
+    const resolved = resolveRetention({
+      provided: retention,
+      pinned: pinnedValue,
+      ttlSeconds: ttlContext ?? null
+    });
+    if (resolved.retention !== retentionValue) {
+      retentionValue = resolved.retention;
+      retentionMutated = true;
+      if (retentionValue !== existingRetention) {
+        update.retention = retentionValue;
+        mutated = true;
+      }
+      response.retention = retentionValue;
+    }
+  }
+
   if (ttlSeconds !== undefined) {
     mutated = true;
     if (ttlSeconds === null || ttlSeconds <= 0) {
+      ttlSecondsResult = undefined;
+      expiresAtResult = null;
       unset.expiresAt = '';
       unset.ttlSeconds = '';
       response.ttlSeconds = null;
       response.expiresAt = null;
     } else {
       const ttlValue = ttlSeconds;
-      const expiresAt = computeExpirationDate(new Date(), ttlValue);
+      ttlSecondsResult = ttlValue;
+      const expiresAt = computeExpirationDate(createdAtReference, ttlValue);
       if (expiresAt) {
         update.expiresAt = expiresAt;
         update.ttlSeconds = ttlValue;
         response.ttlSeconds = ttlValue;
         response.expiresAt = expiresAt;
+        expiresAtResult = expiresAt;
       } else {
         unset.expiresAt = '';
         unset.ttlSeconds = '';
         response.ttlSeconds = null;
         response.expiresAt = null;
+        expiresAtResult = null;
       }
     }
   }
+
+  if (!retentionMutated) {
+    const inferred = resolveRetention({
+      provided: null,
+      pinned: pinnedValue,
+      ttlSeconds: ttlSecondsResult ?? null
+    });
+    if (inferred.retention !== retentionValue) {
+      retentionValue = inferred.retention;
+      retentionMutated = true;
+      if (retentionValue !== existingRetention) {
+        update.retention = retentionValue;
+        mutated = true;
+      }
+    }
+  }
+
+  if (isRetentionProtected(retentionValue)) {
+    if (ttlSecondsResult !== undefined || expiresAtResult) {
+      ttlSecondsResult = undefined;
+      expiresAtResult = null;
+      delete update.ttlSeconds;
+      delete update.expiresAt;
+      unset.ttlSeconds = '';
+      unset.expiresAt = '';
+      response.ttlSeconds = null;
+      response.expiresAt = null;
+      mutated = true;
+    }
+  } else if (retentionValue === 'ephemeral' && ttlSecondsResult === undefined) {
+    ttlSecondsResult = EPHEMERAL_TTL_DEFAULT_SECONDS;
+    const expiresAt = computeExpirationDate(createdAtReference, ttlSecondsResult);
+    delete unset.ttlSeconds;
+    delete unset.expiresAt;
+    update.ttlSeconds = ttlSecondsResult;
+    if (expiresAt) {
+      update.expiresAt = expiresAt;
+      response.expiresAt = expiresAt;
+      expiresAtResult = expiresAt;
+    } else {
+      delete update.expiresAt;
+      expiresAtResult = null;
+    }
+    response.ttlSeconds = ttlSecondsResult;
+    mutated = true;
+  }
+
+  response.retention = retentionValue;
 
   if (type !== undefined) {
     mutated = true;
@@ -1535,14 +1697,20 @@ const apiRoutes: RouteDefinition[] = [
           graphEnrich:
             typeof query.graphEnrich === 'string'
               ? query.graphEnrich === 'true'
-              : undefined
+              : undefined,
+          retention: typeof query.retention === 'string' ? query.retention : undefined
         });
 
         const tenant = ensureTenant(parsed, { allowFallback: false });
         const result = await listMemories(tenant, {
           limit: parsed.limit,
           pinned: parsed.pinned,
-          tag: parsed.tag
+          tag: parsed.tag,
+          type: parsed.type ?? undefined,
+          visibility: parsed.visibility ?? undefined,
+          store: parsed.store ?? undefined,
+          graphEnrich: parsed.graphEnrich ?? undefined,
+          retention: parsed.retention ?? undefined
         });
         return buildResponse(result);
       }),
@@ -1562,7 +1730,16 @@ const apiRoutes: RouteDefinition[] = [
           pinned: parsed.pinned,
           tags: parsed.tags,
           ttlSeconds: parsed.ttlSeconds,
-          idempotencyKey: parsed.idempotencyKey
+          idempotencyKey: parsed.idempotencyKey,
+          type: parsed.type ?? undefined,
+          lang: parsed.lang ?? undefined,
+          importanceScore: parsed.importanceScore ?? undefined,
+          recencyScore: parsed.recencyScore ?? undefined,
+          source: parsed.source ?? undefined,
+          acl: parsed.acl ?? undefined,
+          piiFlags: parsed.piiFlags ?? undefined,
+          storage: parsed.storage ?? undefined,
+          retention: parsed.retention ?? undefined
         });
         return buildResponse(created, 201);
       })
@@ -1690,6 +1867,33 @@ const apiRoutes: RouteDefinition[] = [
         if (parsed.ttlSeconds !== undefined) {
           updatePayload.ttlSeconds = parsed.ttlSeconds;
         }
+        if (parsed.type !== undefined) {
+          updatePayload.type = parsed.type;
+        }
+        if (parsed.lang !== undefined) {
+          updatePayload.lang = parsed.lang;
+        }
+        if (parsed.importanceScore !== undefined) {
+          updatePayload.importanceScore = parsed.importanceScore;
+        }
+        if (parsed.recencyScore !== undefined) {
+          updatePayload.recencyScore = parsed.recencyScore;
+        }
+        if (parsed.source !== undefined) {
+          updatePayload.source = parsed.source;
+        }
+        if (parsed.acl !== undefined) {
+          updatePayload.acl = parsed.acl;
+        }
+        if (parsed.piiFlags !== undefined) {
+          updatePayload.piiFlags = parsed.piiFlags;
+        }
+        if (parsed.storage !== undefined) {
+          updatePayload.storage = parsed.storage;
+        }
+        if (parsed.retention !== undefined) {
+          updatePayload.retention = parsed.retention;
+        }
         const result = await updateMemory(tenant, updatePayload);
         return buildResponse(result);
       }),
@@ -1723,7 +1927,12 @@ export default new Module('memory', {
         return await listMemories(tenant, {
           limit: parsed.limit,
           pinned: parsed.pinned,
-          tag: parsed.tag
+          tag: parsed.tag,
+          type: parsed.type ?? undefined,
+          visibility: parsed.visibility ?? undefined,
+          store: parsed.store ?? undefined,
+          graphEnrich: parsed.graphEnrich ?? undefined,
+          retention: parsed.retention ?? undefined
         });
       } catch (error) {
         if (isProvisioningError(error)) {
@@ -1795,7 +2004,16 @@ export default new Module('memory', {
           pinned: parsed.pinned,
           tags: parsed.tags,
           ttlSeconds: parsed.ttlSeconds,
-          idempotencyKey: parsed.idempotencyKey
+          idempotencyKey: parsed.idempotencyKey,
+          type: parsed.type ?? undefined,
+          lang: parsed.lang ?? undefined,
+          importanceScore: parsed.importanceScore ?? undefined,
+          recencyScore: parsed.recencyScore ?? undefined,
+          source: parsed.source ?? undefined,
+          acl: parsed.acl ?? undefined,
+          piiFlags: parsed.piiFlags ?? undefined,
+          storage: parsed.storage ?? undefined,
+          retention: parsed.retention ?? undefined
         });
       } catch (error) {
         if (isProvisioningError(error)) {

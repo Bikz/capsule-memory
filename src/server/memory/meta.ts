@@ -25,6 +25,23 @@ export type CapsuleProvenanceEvent = {
 
 export type CapsulePiiFlags = Record<string, boolean>;
 
+export const RETENTION_VALUES = ['irreplaceable', 'permanent', 'replaceable', 'ephemeral'] as const;
+
+export type CapsuleRetention = (typeof RETENTION_VALUES)[number];
+
+export const DEFAULT_RETENTION: CapsuleRetention = 'replaceable';
+
+export const EPHEMERAL_TTL_DEFAULT_SECONDS = 60 * 60 * 24 * 7; // 7 days
+
+const EPHEMERAL_TTL_THRESHOLD_SECONDS = 60 * 60 * 24 * 3; // classify short-lived memories as ephemeral
+
+const RETENTION_PRIORITY: Record<CapsuleRetention, number> = {
+  ephemeral: 0,
+  replaceable: 1,
+  permanent: 3,
+  irreplaceable: 4
+};
+
 export type CapsuleStorageState = {
   store: StorageDestination;
   policies: string[];
@@ -40,6 +57,7 @@ export type CapsuleMetadataInput = {
   source?: CapsuleSource | null;
   acl?: CapsuleAcl | null;
   piiFlags?: CapsulePiiFlags | null;
+  retention?: CapsuleRetention | null;
 };
 
 const LANGUAGE_FALLBACK = 'und';
@@ -169,4 +187,30 @@ export function createProvenanceEvent(params: {
     ...(params.description ? { description: params.description } : {}),
     ...(params.referenceId ? { referenceId: params.referenceId } : {})
   };
+}
+
+export function resolveRetention(params: {
+  provided?: CapsuleRetention | null;
+  pinned?: boolean;
+  ttlSeconds?: number | null;
+}): { retention: CapsuleRetention; autoAssigned: boolean } {
+  const { provided, pinned, ttlSeconds } = params;
+  if (provided && RETENTION_VALUES.includes(provided)) {
+    return { retention: provided, autoAssigned: false };
+  }
+  if (pinned) {
+    return { retention: 'irreplaceable', autoAssigned: true };
+  }
+  if (typeof ttlSeconds === 'number' && ttlSeconds > 0 && ttlSeconds <= EPHEMERAL_TTL_THRESHOLD_SECONDS) {
+    return { retention: 'ephemeral', autoAssigned: true };
+  }
+  return { retention: DEFAULT_RETENTION, autoAssigned: true };
+}
+
+export function isRetentionProtected(retention: CapsuleRetention): boolean {
+  return retention === 'irreplaceable' || retention === 'permanent';
+}
+
+export function retentionPriority(retention: CapsuleRetention): number {
+  return RETENTION_PRIORITY[retention];
 }

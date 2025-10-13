@@ -19,6 +19,7 @@ export type CapsuleSource = {
 };
 export type CapsulePiiFlags = Record<string, boolean>;
 export type StorageDestination = "short_term" | "long_term" | "capsule_graph";
+export type CapsuleRetention = "irreplaceable" | "permanent" | "replaceable" | "ephemeral";
 export type StorageConfig = {
     store?: StorageDestination;
     graphEnrich?: boolean | null;
@@ -51,6 +52,7 @@ export type CreateMemoryInput = {
     piiFlags?: CapsulePiiFlags | null;
     storage?: StorageConfig | null;
     subjectId?: string;
+    retention?: CapsuleRetention | null;
 };
 export type UpdateMemoryInput = {
     id: string;
@@ -66,6 +68,7 @@ export type UpdateMemoryInput = {
     piiFlags?: CapsulePiiFlags | null;
     storage?: StorageConfig | null;
     subjectId?: string;
+    retention?: CapsuleRetention | null;
 };
 export type SearchInput = {
     query: string;
@@ -85,6 +88,7 @@ export type ListInput = {
     store?: StorageDestination;
     graphEnrich?: boolean;
     subjectId?: string;
+    retention?: CapsuleRetention;
 };
 export type DeleteInput = {
     id: string;

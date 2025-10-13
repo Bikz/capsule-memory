@@ -58,7 +58,8 @@ export class CapsuleMemoryClient {
                 source: input.source,
                 acl: input.acl,
                 piiFlags: input.piiFlags,
-                storage: input.storage
+                storage: input.storage,
+                retention: input.retention
             }),
             subjectId: input.subjectId
         });
@@ -79,6 +80,8 @@ export class CapsuleMemoryClient {
             params.set("store", input.store);
         if (typeof input.graphEnrich === "boolean")
             params.set("graphEnrich", String(input.graphEnrich));
+        if (input.retention)
+            params.set("retention", input.retention);
         if (input.subjectId)
             params.set("subjectId", input.subjectId);
         const qs = params.toString() ? `?${params.toString()}` : "";
@@ -124,7 +127,8 @@ export class CapsuleMemoryClient {
                 source: input.source,
                 acl: input.acl,
                 piiFlags: input.piiFlags,
-                storage: input.storage
+                storage: input.storage,
+                retention: input.retention
             }),
             subjectId: input.subjectId
         });

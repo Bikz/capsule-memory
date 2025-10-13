@@ -1,0 +1,72 @@
+[
+  {
+    "id": "pref-001",
+    "role": "user",
+    "content": "Just so you remember, I prefer meetings on Tuesday afternoons after 2pm.",
+    "expected": true,
+    "category": "preference"
+  },
+  {
+    "id": "pref-002",
+    "role": "assistant",
+    "content": "Got it, I'll remember that you like meetings on Tuesdays.",
+    "expected": false,
+    "category": "preference"
+  },
+  {
+    "id": "fact-001",
+    "role": "user",
+    "content": "My company email is alex@capsule.dev and it never changes.",
+    "expected": true,
+    "category": "fact"
+  },
+  {
+    "id": "fact-002",
+    "role": "user",
+    "content": "What's the status on the launch?",
+    "expected": false,
+    "category": "other"
+  },
+  {
+    "id": "task-001",
+    "role": "user",
+    "content": "Please remind me every Friday morning to send the weekly update.",
+    "expected": true,
+    "category": "task"
+  },
+  {
+    "id": "task-002",
+    "role": "assistant",
+    "content": "I'll set a reminder for Fridays at 9am.",
+    "expected": false,
+    "category": "task"
+  },
+  {
+    "id": "context-001",
+    "role": "user",
+    "content": "Ignore this, we were just chatting about lunch plans.",
+    "expected": false,
+    "category": "other"
+  },
+  {
+    "id": "pref-003",
+    "role": "user",
+    "content": "Call me Lex during conversations, that's what my friends call me.",
+    "expected": true,
+    "category": "preference"
+  },
+  {
+    "id": "fact-003",
+    "role": "user",
+    "content": "My billing address is 123 Market Street, San Francisco, CA 94105.",
+    "expected": true,
+    "category": "fact"
+  },
+  {
+    "id": "smalltalk-001",
+    "role": "user",
+    "content": "lol that was funny",
+    "expected": false,
+    "category": "other"
+  }
+]

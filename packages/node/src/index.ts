@@ -25,6 +25,8 @@ export type CapsulePiiFlags = Record<string, boolean>;
 
 export type StorageDestination = "short_term" | "long_term" | "capsule_graph";
 
+export type CapsuleRetention = "irreplaceable" | "permanent" | "replaceable" | "ephemeral";
+
 export type StorageConfig = {
   store?: StorageDestination;
   graphEnrich?: boolean | null;
@@ -59,6 +61,7 @@ export type CreateMemoryInput = {
   piiFlags?: CapsulePiiFlags | null;
   storage?: StorageConfig | null;
   subjectId?: string;
+  retention?: CapsuleRetention | null;
 };
 
 export type UpdateMemoryInput = {
@@ -75,6 +78,7 @@ export type UpdateMemoryInput = {
   piiFlags?: CapsulePiiFlags | null;
   storage?: StorageConfig | null;
   subjectId?: string;
+  retention?: CapsuleRetention | null;
 };
 
 export type SearchInput = {
@@ -96,6 +100,7 @@ export type ListInput = {
   store?: StorageDestination;
   graphEnrich?: boolean;
   subjectId?: string;
+  retention?: CapsuleRetention;
 };
 
 export type DeleteInput = {
@@ -172,7 +177,8 @@ export class CapsuleMemoryClient {
         source: input.source,
         acl: input.acl,
         piiFlags: input.piiFlags,
-        storage: input.storage
+        storage: input.storage,
+        retention: input.retention
       }),
       subjectId: input.subjectId
     });
@@ -187,6 +193,7 @@ export class CapsuleMemoryClient {
     if (input.visibility) params.set("visibility", input.visibility);
     if (input.store) params.set("store", input.store);
     if (typeof input.graphEnrich === "boolean") params.set("graphEnrich", String(input.graphEnrich));
+    if (input.retention) params.set("retention", input.retention);
     if (input.subjectId) params.set("subjectId", input.subjectId);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return this.request(`/v1/memories${qs}`, { method: "GET", subjectId: input.subjectId });
@@ -235,7 +242,8 @@ export class CapsuleMemoryClient {
         source: input.source,
         acl: input.acl,
         piiFlags: input.piiFlags,
-        storage: input.storage
+        storage: input.storage,
+        retention: input.retention
       }),
       subjectId: input.subjectId
     });

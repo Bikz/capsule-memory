@@ -1,4 +1,4 @@
-import type { CapsuleAcl, CapsuleSource, CapsuleStorageState } from './meta';
+import type { CapsuleAcl, CapsuleRetention, CapsuleSource, CapsuleStorageState } from './meta';
 import type { SearchRecipe } from './recipes';
 
 const POLICY_LOG_ENABLED = (process.env.CAPSULE_LOG_POLICIES ?? 'true').toLowerCase() !== 'false';
@@ -27,6 +27,8 @@ export function logPolicyDecision(params: {
   tags?: string[];
   source?: CapsuleSource;
   acl: CapsuleAcl;
+  retention?: CapsuleRetention;
+  retentionAutoAssigned?: boolean;
   event?: string;
 }) {
   if (!POLICY_LOG_ENABLED) {
@@ -45,7 +47,9 @@ export function logPolicyDecision(params: {
     type: params.type ?? null,
     tags: params.tags ?? [],
     source: params.source ?? null,
-    acl: params.acl.visibility
+    acl: params.acl.visibility,
+    retention: params.retention ?? null,
+    retentionAutoAssigned: params.retentionAutoAssigned ?? null
   };
 
   console.info(JSON.stringify(payload));

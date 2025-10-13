@@ -111,6 +111,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run local:bundle` | Build a distributable Capsule Local bundle (config + manifest + scripts). |
 | `npm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
 | `npm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
+| `npm run eval:capture` | Score conversation events and report capture precision/recall metrics. |
 | `npm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
 
 ### Validation checklist
@@ -150,6 +151,9 @@ The script respects `MONGO_DB` if you need to target a specific database within 
 - **BYOK rotation**: 1) issue a new key in your KMS, 2) replay write/update calls with both the previous and new keys (Capsule
   decrypts with the header-provided key, re-encrypts with the same header), 3) once re-encryption completes, revoke the old key.
   During rotation, route traffic with the new header value to avoid mixed ciphertext.
+- **Retention metadata**: tag memories as `irreplaceable`, `permanent`, `replaceable`, or `ephemeral`. Irreplaceable/permanent
+  entries bypass automated eviction, while ephemerals inherit short TTLs unless overridden. The UI, REST API, and SDKs accept a
+  `retention` field, defaulting to auto-selection (pinned ⇒ irreplaceable).
 - **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
   events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
 - **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.

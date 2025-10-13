@@ -21,6 +21,28 @@ Competitive targets: match or exceed Supermemory’s sub-300 ms recall, multi-
 
 This foundation enables a programmable, privacy-first memory layer.
 
+## Current Focus (May 2024)
+
+### Memory Capture & Quality
+- [x] Design a conversation-to-memory candidate scorer that evaluates dialogue events, produces confidence scores, and gates auto-ingest based on tenant policies.
+- [x] Build an evaluation dataset (positive/negative examples) plus precision/recall metrics to validate the gating heuristics before shipping default thresholds.
+- [ ] Surface a review queue or operator webhook so teams can audit “proposed memories” and provide feedback that retrains the scorer.
+
+### Metadata & Retention Controls
+- [x] Extend the CapsuleMeta schema/API/SDKs with a `retention` field (e.g., `irreplaceable`, `permanent`, `replaceable`, `ephemeral`) and expose it in the Studio UI.
+- [x] Update storage policies, eviction logic, and TTL handling so irreplaceable/permanent records bypass automated forgetting while ephemeral memories decay faster.
+- [x] Auto-suggest retention levels during ingest (pinned memories default to irreplaceable) and log overrides for future policy tuning.
+
+### Retrieval Recipes & Ranking
+- [ ] Publish a curated recipe library (topical focus, recency bias, subject-specific) with configuration docs and regression tests in `npm run eval:retrieval`.
+- [ ] Incorporate retention metadata into scoring/reranking so “irreplaceable” memories get boosted even when scoring is ambiguous.
+- [ ] Benchmark rewrite/rerank combinations per recipe and promote defaults that balance latency and answer quality.
+
+### Developer Experience & Integrations
+- [ ] Update SDKs (Node + upcoming Python) and MCP tooling to expose new retention metadata and candidate-review endpoints.
+- [ ] Document the end-to-end blueprint for connectors/agents: capture conversation events → scorer → review queue → persisted memory.
+- [ ] Add observability hooks (logs + dashboard script) tracking memory creation rate, acceptance rate, and reasons for rejection to close the loop with design partners.
+
 ## Roadmap Overview (12–16 weeks to parity + differentiation; 6–12 months to moat)
 
 ### Wave 1 – Competitive Parity & Fit (Weeks 0–6)

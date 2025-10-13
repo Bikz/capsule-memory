@@ -15,6 +15,7 @@ type MemoryItem = {
   subjectId: string;
   tags?: string[];
   expiresAt?: string | Date;
+  retention?: string;
 };
 
 type GetMemoriesResponse = {
@@ -32,6 +33,7 @@ type AddMemoryResponse = {
   subjectId: string;
   tags?: string[];
   expiresAt?: string | Date;
+  retention?: string;
   explanation: string;
   forgottenMemoryId: string | null;
 };
@@ -65,10 +67,32 @@ function formatDate(value: string | Date): string {
   return date.toLocaleString();
 }
 
+function formatRetention(value?: string): string {
+  const normalized = value ?? 'replaceable';
+  return normalized.replace(/(^|\s|-)([a-z])/g, (_match, prefix, letter) => `${prefix}${letter.toUpperCase()}`);
+}
+
+type RetentionOption = 'auto' | 'irreplaceable' | 'permanent' | 'replaceable' | 'ephemeral';
+
+const RETENTION_OPTIONS: { value: RetentionOption; label: string }[] = [
+  { value: 'auto', label: 'Auto (based on pin & TTL)' },
+  { value: 'irreplaceable', label: 'Irreplaceable (never forget)' },
+  { value: 'permanent', label: 'Permanent' },
+  { value: 'replaceable', label: 'Replaceable' },
+  { value: 'ephemeral', label: 'Ephemeral (decays quickly)' }
+];
+
+type AddMemoryVariables = {
+  content: string;
+  pinned: boolean;
+  retention: RetentionOption;
+};
+
 export default function MemoryPage(): JSX.Element {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
   const [pinned, setPinned] = useState(false);
+  const [retention, setRetention] = useState<RetentionOption>('auto');
   const [searchInput, setSearchInput] = useState('');
 
   const tenant = useMemo(
@@ -87,21 +111,19 @@ export default function MemoryPage(): JSX.Element {
     queryFn: () => callMethod<GetMemoriesResponse>('memory.getMemories', tenant),
   });
 
-  const addMemoryMutation = useMutation<
-    AddMemoryResponse,
-    Error,
-    { content: string; pinned: boolean }
-  >({
-    mutationFn: (variables: { content: string; pinned: boolean }) =>
+  const addMemoryMutation = useMutation<AddMemoryResponse, Error, AddMemoryVariables>({
+    mutationFn: (variables: AddMemoryVariables) =>
       callMethod<AddMemoryResponse>('memory.addMemory', {
         ...tenant,
         content: variables.content,
         pinned: variables.pinned,
+        retention: variables.retention === 'auto' ? undefined : variables.retention,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory.getMemories'] });
       setContent('');
       setPinned(false);
+      setRetention('auto');
     },
   });
 
@@ -169,7 +191,7 @@ export default function MemoryPage(): JSX.Element {
     if (!content.trim()) {
       return;
     }
-    addMemoryMutation.mutate({ content: content.trim(), pinned });
+    addMemoryMutation.mutate({ content: content.trim(), pinned, retention });
   };
 
   const onSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -210,6 +232,23 @@ export default function MemoryPage(): JSX.Element {
               rows={4}
               className="w-full rounded-lg border border-slate-700 bg-slate-950/80 p-3 text-white focus:border-indigo-400 focus:outline-none"
             />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <label className="text-sm font-semibold text-slate-300" htmlFor="retention">
+                Retention policy
+              </label>
+              <select
+                id="retention"
+                value={retention}
+                onChange={(event) => setRetention(event.target.value as RetentionOption)}
+                className="w-full sm:w-64 rounded-lg border border-slate-700 bg-slate-950/80 p-2 text-sm text-white focus:border-indigo-400 focus:outline-none"
+              >
+                {RETENTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <label className="inline-flex items-center gap-2 text-slate-200">
                 <input
@@ -276,6 +315,9 @@ export default function MemoryPage(): JSX.Element {
                     <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
                       <span>{formatDate(memory.createdAt)}</span>
                       {memory.pinned ? <span className="inline-flex items-center gap-1 text-amber-300">📌 Pinned</span> : null}
+                      <span className="inline-flex items-center gap-1 text-sky-300">
+                        Retention: {formatRetention(memory.retention)}
+                      </span>
                     </div>
                   </div>
                   <div className="flex flex-col gap-2">
@@ -335,16 +377,21 @@ export default function MemoryPage(): JSX.Element {
             <div className="mt-6 space-y-3">
               <p className="text-sm text-slate-300">{searchMemoryMutation.data.explanation}</p>
               {searchMemoryMutation.data.metrics ? (
-                <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide text-slate-500">
-                  <span>
-                    rewrite: {searchMemoryMutation.data.metrics.rewriteApplied ? 'on' : 'off'}
-                    {` (${searchMemoryMutation.data.metrics.rewriteLatencyMs}ms)`}
-                  </span>
-                  <span>
-                    rerank: {searchMemoryMutation.data.metrics.rerankApplied ? 'on' : 'off'}
-                    {` (${searchMemoryMutation.data.metrics.rerankLatencyMs}ms)`}
-                  </span>
-                </div>
+                  <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide text-slate-500">
+                    <span>
+                      rewrite: {searchMemoryMutation.data.metrics.rewriteApplied ? 'on' : 'off'}
+                      {` (${searchMemoryMutation.data.metrics.rewriteLatencyMs}ms)`}
+                    </span>
+                    <span>
+                      rerank: {searchMemoryMutation.data.metrics.rerankApplied ? 'on' : 'off'}
+                      {` (${searchMemoryMutation.data.metrics.rerankLatencyMs}ms)`}
+                    </span>
+                    {searchMemoryMutation.data.results[0]?.retention ? (
+                      <span>
+                        top retention: {formatRetention(searchMemoryMutation.data.results[0]?.retention)}
+                      </span>
+                    ) : null}
+                  </div>
               ) : null}
               {searchMemoryMutation.data.results.length === 0 ? (
                 <p className="text-slate-400">No memories matched your query.</p>
