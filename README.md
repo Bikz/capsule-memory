@@ -207,7 +207,7 @@ your AI recall the past with confidence.
 
 ## Competitive Roadmap
 
-See [docs/memory-roadmap.md](docs/memory-roadmap.md) for the competitive analysis, phased roadmap, and KPI targets that guide Capsule Memory toward best-in-class performance against Mem0 and Supermemory.
+See [docs/memory-roadmap.md](docs/memory-roadmap.md) for the competitive analysis, phased roadmap, and KPI targets that guide Capsule Memory toward best-in-class performance against Mem0 and Supermemory. A high-level state of delivery is tracked in [docs/status.md](docs/status.md).
 
 ## MCP Bridge (Claude / local agents)
 

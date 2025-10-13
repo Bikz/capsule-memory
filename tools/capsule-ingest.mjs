@@ -4,12 +4,19 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
 import { CapsuleMemoryClient } from '../packages/node/dist/index.js';
+import connectorsCatalog from '../config/connectors.json' assert { type: 'json' };
 
 const API_BASE = (process.env.CAPSULE_MEMORY_URL || 'http://localhost:3000').replace(/\/$/, '');
 const API_KEY = process.env.CAPSULE_API_KEY || 'demo-key';
 const ORG_ID = process.env.CAPSULE_DEFAULT_ORG_ID || 'demo-org';
 const PROJECT_ID = process.env.CAPSULE_DEFAULT_PROJECT_ID || 'demo-project';
 const SUBJECT_ID = process.env.CAPSULE_DEFAULT_SUBJECT_ID || 'local-operator';
+
+const CONNECTORS = connectorsCatalog;
+
+function listConnectorIds() {
+  return CONNECTORS.map((connector) => connector.id).join(', ');
+}
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -41,7 +48,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule Connector Ingest CLI\n\nUsage: npm run ingest -- --connector notion --source path/to/export.json\n       npm run ingest -- --connector google-drive --source ./drive-folder\n\nOptions:\n  --connector, -c   Connector id (notion | google-drive)\n  --source, -s      Source file or directory (export JSON for Notion, folder for Drive).\n  --dataset, -d     Optional label recorded with the ingestion job.\n`);
+  console.log(`Capsule Connector Ingest CLI\n\nUsage: npm run ingest -- --connector notion --source path/to/export.json\n       npm run ingest -- --connector google-drive --source ./drive-folder\n\nOptions:\n  --connector, -c   Connector id (${listConnectorIds()})\n  --source, -s      Source file or directory (export JSON for Notion, folder for Drive).\n  --dataset, -d     Optional label recorded with the ingestion job.\n`);
 }
 
 async function request(method, url, body) {
@@ -112,6 +119,11 @@ async function ingest({ connector, source, dataset }) {
   }
   if (!source) {
     throw new Error('Source path is required.');
+  }
+
+  const connectorMeta = CONNECTORS.find((item) => item.id === connector);
+  if (!connectorMeta) {
+    throw new Error(`Unknown connector "${connector}". Known ids: ${listConnectorIds()}`);
   }
 
   const jobId = await createJob(connector, dataset);

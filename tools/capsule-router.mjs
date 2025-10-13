@@ -139,6 +139,7 @@ function buildServer({ config, configPath }) {
           query: prompt,
           limit,
           recipe,
+          prompt,
           subjectId
         });
         const durationMs = performance.now() - start;

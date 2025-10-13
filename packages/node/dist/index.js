@@ -87,7 +87,12 @@ export class CapsuleMemoryClient {
     async search(input) {
         return this.request("/v1/memories/search", {
             method: "POST",
-            body: JSON.stringify({ query: input.query, limit: input.limit, recipe: input.recipe }),
+            body: JSON.stringify({
+                query: input.query,
+                limit: input.limit,
+                recipe: input.recipe,
+                prompt: input.prompt
+            }),
             subjectId: input.subjectId
         });
     }

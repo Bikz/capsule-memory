@@ -140,6 +140,7 @@ export default function MemoryPage(): JSX.Element {
       callMethod<SearchMemoryResponse>('memory.searchMemory', {
         ...tenant,
         query: variables.query,
+        prompt: variables.query,
       }),
   });
 

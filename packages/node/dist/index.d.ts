@@ -71,6 +71,7 @@ export type SearchInput = {
     query: string;
     limit?: number;
     recipe?: string;
+    prompt?: string;
     subjectId?: string;
 };
 export type ListInput = {

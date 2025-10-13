@@ -1,0 +1,22 @@
+[
+  {
+    "id": "notion",
+    "provider": "notion",
+    "label": "Notion workspace",
+    "description": "Ingests Notion database exports or API snapshots with automatic tagging.",
+    "docs": "https://developers.notion.com/reference/intro",
+    "env": ["NOTION_ACCESS_TOKEN", "NOTION_DATABASE_ID"],
+    "polling": "manual CLI trigger",
+    "tags": ["knowledge", "graph_enrich"]
+  },
+  {
+    "id": "google-drive",
+    "provider": "google-drive",
+    "label": "Google Drive folder",
+    "description": "Syncs text/Docs exports from Drive folders with semantic tagging.",
+    "docs": "https://developers.google.com/drive/api",
+    "env": ["GOOGLE_DRIVE_FOLDER_PATH"],
+    "polling": "manual CLI trigger",
+    "tags": ["knowledge", "files"]
+  }
+]

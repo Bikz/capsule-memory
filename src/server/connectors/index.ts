@@ -1,6 +1,7 @@
 import { Module, ObjectId, type RouteDefinition, type RouteParams } from 'modelence/server';
 import { z } from 'zod';
 
+import connectorsCatalog from '../../../config/connectors.json' assert { type: 'json' };
 import { dbConnectorJobs } from './db';
 
 const API_KEY_HEADER = 'x-capsule-key';
@@ -10,28 +11,16 @@ const ALLOWED_API_KEYS = (process.env.CAPSULE_API_KEYS ?? 'demo-key')
   .map((value) => value.trim())
   .filter(Boolean);
 
-const CONNECTORS = [
-  {
-    id: 'notion',
-    provider: 'notion',
-    label: 'Notion workspace',
-    description: 'Ingests Notion database exports or API snapshots with automatic tagging.',
-    docs: 'https://developers.notion.com/reference/intro',
-    env: ['NOTION_ACCESS_TOKEN', 'NOTION_DATABASE_ID'],
-    polling: 'manual CLI trigger',
-    tags: ['knowledge', 'graph_enrich']
-  },
-  {
-    id: 'google-drive',
-    provider: 'google-drive',
-    label: 'Google Drive folder',
-    description: 'Syncs text/Docs exports from Drive folders with semantic tagging.',
-    docs: 'https://developers.google.com/drive/api',
-    env: ['GOOGLE_DRIVE_FOLDER_PATH'],
-    polling: 'manual CLI trigger',
-    tags: ['knowledge', 'files']
-  }
-] as const;
+const CONNECTORS = connectorsCatalog as ReadonlyArray<{
+  id: string;
+  provider: string;
+  label: string;
+  description?: string;
+  docs?: string;
+  env?: string[];
+  polling?: string;
+  tags?: string[];
+}>;
 
 const connectorIdSchema = z.enum(CONNECTORS.map((connector) => connector.id) as [string, ...string[]]);
 

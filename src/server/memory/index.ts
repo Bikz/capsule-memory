@@ -171,7 +171,8 @@ const recipeDefinitionSchema = z.object({
 const recipePreviewSchema = tenantArgSchema.extend({
   query: z.string().min(1),
   limit: z.number().int().positive().max(50).optional(),
-  recipe: recipeDefinitionSchema
+  recipe: recipeDefinitionSchema,
+  prompt: z.string().min(1).optional()
 });
 
 const policyPreviewSchema = tenantArgSchema.extend({
@@ -240,7 +241,8 @@ const listMemoriesSchema = tenantArgSchema.extend({
 const searchMemorySchema = tenantArgSchema.extend({
   query: z.string().min(1),
   limit: z.number().int().positive().max(50).optional(),
-  recipe: recipeNameSchema.optional()
+  recipe: recipeNameSchema.optional(),
+  prompt: z.string().min(1).optional()
 });
 
 const deleteMemorySchema = tenantArgSchema.extend({
@@ -949,16 +951,16 @@ async function listMemories(
 async function searchMemories(
   scope: TenantScope,
   queryString: string,
-  options?: { limit?: number; recipe?: string }
+  options?: { limit?: number; recipe?: string; prompt?: string }
 ): Promise<{
   query: string;
-  results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number }>;
+  results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean }>;
   recipe: string;
   explanation: string;
 }> {
   const recipe = getSearchRecipe(options?.recipe);
   return executeRecipeSearch(scope, recipe, queryString, options?.limit, 'capsule.recipe.usage', {
-    prompt: queryString
+    prompt: options?.prompt ?? queryString
   });
 }
 
@@ -966,11 +968,12 @@ async function previewRecipeSearch(
   scope: TenantScope,
   recipeDefinition: z.infer<typeof recipeDefinitionSchema>,
   queryString: string,
-  limit?: number
+  limit?: number,
+  prompt?: string
 ) {
   const recipe = buildRecipeFromDefinition(recipeDefinition);
   return executeRecipeSearch(scope, recipe, queryString, limit, 'capsule.recipe.preview', {
-    prompt: queryString
+    prompt: prompt ?? queryString
   });
 }
 
@@ -1476,7 +1479,8 @@ const apiRoutes: RouteDefinition[] = [
         const tenant = ensureTenant(parsed, { allowFallback: false });
         const result = await searchMemories(tenant, parsed.query, {
           limit: parsed.limit,
-          recipe: parsed.recipe
+          recipe: parsed.recipe,
+          prompt: parsed.prompt
         });
         return buildResponse(result);
       })
@@ -1500,7 +1504,7 @@ const apiRoutes: RouteDefinition[] = [
           subjectId: scope.subjectId
         });
         const tenant = ensureTenant(parsed, { allowFallback: false });
-        const result = await previewRecipeSearch(tenant, parsed.recipe, parsed.query, parsed.limit);
+        const result = await previewRecipeSearch(tenant, parsed.recipe, parsed.query, parsed.limit, parsed.prompt);
         return buildResponse(result);
       })
     }
@@ -1611,7 +1615,8 @@ export default new Module('memory', {
         const tenant = ensureTenant(parsed, { allowFallback: true });
         return await searchMemories(tenant, parsed.query, {
           limit: parsed.limit,
-          recipe: parsed.recipe
+          recipe: parsed.recipe,
+          prompt: parsed.prompt
         });
       } catch (error) {
         if (isProvisioningError(error)) {
