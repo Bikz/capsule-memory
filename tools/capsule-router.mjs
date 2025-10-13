@@ -154,7 +154,8 @@ function buildServer({ config, configPath }) {
             importanceScore: item.importanceScore,
             recencyScore: item.recencyScore,
             storage: item.storage,
-            acl: item.acl
+            acl: item.acl,
+            graphHit: item.graphHit ?? false
           }
         }));
 

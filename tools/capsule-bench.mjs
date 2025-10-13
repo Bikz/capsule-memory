@@ -135,7 +135,8 @@ async function main() {
       topMemory: capsule.results?.[0]?.content ?? null,
       scores: capsule.results?.slice(0, 3).map((item) => ({
         id: item.id,
-        score: item.recipeScore ?? item.score
+        score: item.recipeScore ?? item.score,
+        graphHit: item.graphHit ?? false
       })),
       explanation: capsule.explanation,
       shadow: shadowResponse

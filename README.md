@@ -102,6 +102,8 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run router` | Launch the Capsule Router proxy for quick-start integrations. |
 | `npm run bench` | Execute the Capsule Bench CLI (see docs below). |
 | `npm run mcp:manifest` | Scaffold a ready-to-use MCP manifest that points at the Capsule bridge. |
+| `npm run ingest` | Run the connector ingest helper for Notion/Drive exports. |
+| `npm run local` | Start the Capsule Local SQLite cache service. |
 
 ### Backfill existing memories
 
@@ -178,6 +180,20 @@ npm run ingest -- --connector google-drive --source ./drive-notes --dataset "dri
 ```
 
 Each run registers a job in `/v1/connectors` which you can monitor in Capsule Studio. Provide API credentials or local exports as needed; the CLI tags memories with the connector id so recipes/policies can target them immediately.
+
+### Capsule Local (offline cache)
+
+Bring Capsule Memory offline via a lightweight SQLite service:
+
+```bash
+CAPSULE_LOCAL_DB=./capsule-local.db CAPSULE_LOCAL_PORT=5151 npm run local
+```
+
+The service exposes `/local/memories` for reads and `/local/status` for health checks. Point the MCP bridge or router at this port when operating fully offline, then sync via connectors once back online.
+
+### Vector backend controls
+
+Set `CAPSULE_VECTOR_STORE` to `mongo`, `pgvector`, or `qdrant` to toggle candidate selection. The Mongo-backed path remains default; other values log fallbacks until adapters are wired in. Tune the hotset cache with `CAPSULE_HOTSET_SIZE` (entries) and `CAPSULE_HOTSET_TTL` (ms) to balance latency and freshness.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity

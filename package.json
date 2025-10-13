@@ -18,17 +18,19 @@
     "policies": "node tools/policy-inspector.mjs",
     "router": "node tools/capsule-router.mjs",
     "bench": "node tools/capsule-bench.mjs",
-    "ingest": "node tools/capsule-ingest.mjs"
+    "ingest": "node tools/capsule-ingest.mjs",
+    "local": "node tools/capsule-local.mjs"
   },
   "dependencies": {
-    "ajv": "^8.17.1",
     "@tanstack/react-query": "^5.90.2",
+    "ajv": "^8.17.1",
     "modelence": "^0.5.6",
     "mongodb": "^6.20.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
     "react-router-dom": "^6.22.0",
+    "sqlite3": "^5.1.7",
     "voyageai": "^0.0.8",
     "zod": "^4.1.12"
   },

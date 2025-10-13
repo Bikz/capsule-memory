@@ -294,6 +294,19 @@ const HOTSET_CACHE = new HotsetCache<MemoryDocument[]>(
   Number.parseInt(process.env.CAPSULE_HOTSET_TTL ?? '30000', 10)
 );
 
+async function fetchCandidates(scope: TenantScope, filter: Record<string, unknown>, limit: number) {
+  if (VECTOR_BACKEND === 'pgvector') {
+    console.warn('[Capsule] pgvector backend selected but not yet implemented. Falling back to MongoDB fetch.');
+  } else if (VECTOR_BACKEND === 'qdrant') {
+    console.warn('[Capsule] Qdrant backend selected but not yet implemented. Falling back to MongoDB fetch.');
+  }
+
+  return dbMemories.fetch(filter, {
+    sort: { createdAt: -1 },
+    limit
+  });
+}
+
 startGraphWorker();
 
 function ensureTenant(
@@ -551,20 +564,11 @@ async function executeRecipeSearch(
       cacheHit = true;
       candidates = [...cached];
     } else {
-      candidates = await dbMemories.fetch(fetchFilter, {
-        sort: { createdAt: -1 },
-        limit: candidateLimit
-      });
+      candidates = await fetchCandidates(scope, fetchFilter, candidateLimit);
       HOTSET_CACHE.set(cacheKey, candidates);
     }
   } else {
-    console.warn(
-      `[Capsule] Vector backend "${VECTOR_BACKEND}" is not configured. Falling back to MongoDB candidate search.`
-    );
-    candidates = await dbMemories.fetch(fetchFilter, {
-      sort: { createdAt: -1 },
-      limit: candidateLimit
-    });
+    candidates = await fetchCandidates(scope, fetchFilter, candidateLimit);
   }
 
   const vectorLatency = performance.now() - vectorStart;

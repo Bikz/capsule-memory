@@ -22,9 +22,14 @@
 3. [x] **Latency & scalability groundwork** (roadmap item 9)
    - Vector backend configuration switches, hotset caching, and vector metric logging for future pgvector/Qdrant adapters.
 
+## 🧭 Sprint 3 (Wave 2 launchpad)
+- [x] **Latency & vector groundwork** – VECTOR_BACKEND toggles (`mongo|pgvector|qdrant`), hotset cache, and vector metrics logging.
+- [x] **Adaptive retrieval scaffolding** – recipe previews accept custom blends and cache policy, paving way for rerankers.
+- [x] **Capsule Local prototype** – SQLite-backed offline service with CLI (`npm run local`) and MCP/router compatibility.
+
 ## 🌉 Near-Term Wave 2 (post-parity acceleration)
-- **Adaptive retrieval** – query rewriting + learned rerankers with caches (roadmap item 8).
-- **OpenMemory-class local-first** – Capsule Local desktop app + MCP sharing (item 11).
+- **Adaptive retrieval** – plug in query rewriting + learned rerankers with caches (roadmap item 8).
+- **OpenMemory-class local-first** – Capsule Local desktop app + MCP sharing roll-out (item 11).
 - **Security & governance** – BYOK rollout, row-level ACLs, write-time PII policy gating (item 12).
 
 ## 🛣️ Long-Range (Wave 3 / Moat)
