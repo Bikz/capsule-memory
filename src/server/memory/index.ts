@@ -34,6 +34,8 @@ import {
 import { scheduleGraphJob, startGraphWorker, expandResultsViaGraph } from './graph';
 import { dbGraphEntities, dbGraphJobs } from './graphDb';
 import { logPolicyDecision, logRecipeUsage, logVectorMetrics } from './logging';
+import { rewriteQuery } from './rewrite';
+import { rerankCandidates } from './rerank';
 import { generateEmbedding } from './voyage';
 
 type MemoryDocument = typeof dbMemories.Doc;
@@ -294,7 +296,7 @@ const HOTSET_CACHE = new HotsetCache<MemoryDocument[]>(
   Number.parseInt(process.env.CAPSULE_HOTSET_TTL ?? '30000', 10)
 );
 
-async function fetchCandidates(scope: TenantScope, filter: Record<string, unknown>, limit: number) {
+async function fetchCandidates(filter: Record<string, unknown>, limit: number) {
   if (VECTOR_BACKEND === 'pgvector') {
     console.warn('[Capsule] pgvector backend selected but not yet implemented. Falling back to MongoDB fetch.');
   } else if (VECTOR_BACKEND === 'qdrant') {
@@ -528,12 +530,23 @@ async function executeRecipeSearch(
   recipe: SearchRecipe,
   queryString: string,
   explicitLimit?: number,
-  logEvent: 'capsule.recipe.usage' | 'capsule.recipe.preview' = 'capsule.recipe.usage'
+  logEvent: 'capsule.recipe.usage' | 'capsule.recipe.preview' = 'capsule.recipe.usage',
+  options?: {
+    prompt?: string;
+  }
 ) {
   const limitValue = explicitLimit && explicitLimit > 0 ? explicitLimit : recipe.limit;
   const candidateLimit = Math.max(recipe.candidateLimit, limitValue * 5);
 
-  const queryEmbeddingResult = await generateEmbedding(queryString, 'query');
+  let rewrittenQuery = queryString;
+  if (options?.prompt) {
+    const rewriteResult = await rewriteQuery(options.prompt, queryString);
+    if (rewriteResult) {
+      rewrittenQuery = rewriteResult;
+    }
+  }
+
+  const queryEmbeddingResult = await generateEmbedding(rewrittenQuery, 'query');
   const queryEmbedding = normalizeEmbedding(queryEmbeddingResult.embedding);
 
   const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope) };
@@ -564,11 +577,11 @@ async function executeRecipeSearch(
       cacheHit = true;
       candidates = [...cached];
     } else {
-      candidates = await fetchCandidates(scope, fetchFilter, candidateLimit);
+      candidates = await fetchCandidates(fetchFilter, candidateLimit);
       HOTSET_CACHE.set(cacheKey, candidates);
     }
   } else {
-    candidates = await fetchCandidates(scope, fetchFilter, candidateLimit);
+    candidates = await fetchCandidates(fetchFilter, candidateLimit);
   }
 
   const vectorLatency = performance.now() - vectorStart;
@@ -638,9 +651,29 @@ async function executeRecipeSearch(
     }
   }
 
+  if (process.env.CAPSULE_RERANKER_URL) {
+    const reranked = await rerankCandidates({
+      prompt: options?.prompt ?? '',
+      query: rewrittenQuery,
+      candidates: results.map((item) => ({
+        id: item.id,
+        content: item.content,
+        score: item.recipeScore ?? item.score ?? 0
+      }))
+    });
+    const scoreMap = new Map(reranked.map((item) => [item.id, item.score]));
+    results = results
+      .map((item) => ({
+        ...item,
+        recipeScore: scoreMap.get(item.id) ?? item.recipeScore ?? item.score
+      }))
+      .sort((a, b) => (b.recipeScore ?? 0) - (a.recipeScore ?? 0))
+      .slice(0, limitValue);
+  }
+
   const explanation =
     `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
-    `item(s).`;
+    `item(s).${rewrittenQuery !== queryString ? ' (query rewritten)' : ''}`;
 
   logRecipeUsage({
     scope,
@@ -924,7 +957,9 @@ async function searchMemories(
   explanation: string;
 }> {
   const recipe = getSearchRecipe(options?.recipe);
-  return executeRecipeSearch(scope, recipe, queryString, options?.limit);
+  return executeRecipeSearch(scope, recipe, queryString, options?.limit, 'capsule.recipe.usage', {
+    prompt: queryString
+  });
 }
 
 async function previewRecipeSearch(
@@ -934,7 +969,9 @@ async function previewRecipeSearch(
   limit?: number
 ) {
   const recipe = buildRecipeFromDefinition(recipeDefinition);
-  return executeRecipeSearch(scope, recipe, queryString, limit, 'capsule.recipe.preview');
+  return executeRecipeSearch(scope, recipe, queryString, limit, 'capsule.recipe.preview', {
+    prompt: queryString
+  });
 }
 
 function previewStoragePolicies(
