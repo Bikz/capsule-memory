@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+import { jsonServiceFetch } from './serviceClient';
+
+type Candidate = {
+  id: string;
+  content: string;
+  score: number;
+};
+
 const responseSchema = z.object({
   ranked: z.array(
     z.object({
@@ -9,46 +17,42 @@ const responseSchema = z.object({
   )
 });
 
-async function callReranker(prompt: string, query: string, candidates: { id: string; content: string; score: number }[]) {
-  const url = process.env.CAPSULE_RERANKER_URL;
-  if (!url) {
-    return null;
-  }
-  const key = process.env.CAPSULE_RERANKER_KEY;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(key ? { Authorization: `Bearer ${key}` } : {})
-    },
-    body: JSON.stringify({ prompt, query, candidates })
-  });
-  if (!res.ok) {
-    console.warn('[Capsule] Reranker request failed:', res.status, await res.text());
-    return null;
-  }
-  const payload = await res.json();
-  const parsed = responseSchema.safeParse(payload);
-  if (!parsed.success) {
-    return null;
-  }
-  return parsed.data.ranked;
-}
-
 export async function rerankCandidates(params: {
   prompt: string;
   query: string;
-  candidates: Array<{ id: string; content: string; score: number }>;
-}) {
-  const reranked = await callReranker(params.prompt, params.query, params.candidates);
-  if (reranked) {
-    const scoreMap = new Map(reranked.map((item) => [item.id, item.score]));
-    return params.candidates
-      .map((candidate) => ({
-        ...candidate,
-        score: scoreMap.get(candidate.id) ?? candidate.score
-      }))
-      .sort((a, b) => b.score - a.score);
+  candidates: Candidate[];
+}): Promise<{ candidates: Candidate[]; latencyMs: number; applied: boolean }> {
+  const endpoint = process.env.CAPSULE_RERANKER_URL;
+  if (!endpoint) {
+    return { candidates: params.candidates, latencyMs: 0, applied: false };
   }
-  return params.candidates;
+
+  const key = process.env.CAPSULE_RERANKER_KEY;
+  const result = await jsonServiceFetch(endpoint, {
+    headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+    body: {
+      prompt: params.prompt,
+      query: params.query,
+      candidates: params.candidates
+    }
+  });
+
+  if (!result.ok || !result.data) {
+    return { candidates: params.candidates, latencyMs: result.latencyMs, applied: false };
+  }
+
+  const parsed = responseSchema.safeParse(result.data);
+  if (!parsed.success) {
+    return { candidates: params.candidates, latencyMs: result.latencyMs, applied: false };
+  }
+
+  const scoreMap = new Map(parsed.data.ranked.map((item) => [item.id, item.score]));
+  const ranked = params.candidates
+    .map((candidate) => ({
+      ...candidate,
+      score: scoreMap.get(candidate.id) ?? candidate.score
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  return { candidates: ranked, latencyMs: result.latencyMs, applied: true };
 }

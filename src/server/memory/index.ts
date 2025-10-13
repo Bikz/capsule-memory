@@ -36,6 +36,7 @@ import { dbGraphEntities, dbGraphJobs } from './graphDb';
 import { logPolicyDecision, logRecipeUsage, logVectorMetrics } from './logging';
 import { rewriteQuery } from './rewrite';
 import { rerankCandidates } from './rerank';
+import { shouldRewrite, shouldRerank } from './adaptiveConfig';
 import { generateEmbedding } from './voyage';
 
 type MemoryDocument = typeof dbMemories.Doc;
@@ -560,16 +561,29 @@ async function executeRecipeSearch(
   logEvent: 'capsule.recipe.usage' | 'capsule.recipe.preview' = 'capsule.recipe.usage',
   options?: {
     prompt?: string;
+    forceRewrite?: boolean;
+    forceRerank?: boolean;
   }
 ) {
   const limitValue = explicitLimit && explicitLimit > 0 ? explicitLimit : recipe.limit;
   const candidateLimit = Math.max(recipe.candidateLimit, limitValue * 5);
 
   let rewrittenQuery = queryString;
-  if (options?.prompt) {
-    const rewriteResult = await rewriteQuery(options.prompt, queryString);
-    if (rewriteResult) {
-      rewrittenQuery = rewriteResult;
+  let rewriteApplied = false;
+  let rewriteLatency = 0;
+  const rewriteCandidate = options?.prompt ?? queryString;
+  const allowRewrite = options?.forceRewrite === true
+    ? true
+    : options?.forceRewrite === false
+      ? false
+      : shouldRewrite(queryString, 0);
+
+  if (allowRewrite && rewriteCandidate) {
+    const rewriteResult = await rewriteQuery(rewriteCandidate, queryString);
+    rewriteLatency = rewriteResult.latencyMs;
+    if (rewriteResult.rewritten) {
+      rewrittenQuery = rewriteResult.rewritten;
+      rewriteApplied = true;
     }
   }
 
@@ -682,8 +696,18 @@ async function executeRecipeSearch(
     }
   }
 
-  if (process.env.CAPSULE_RERANKER_URL) {
-    const reranked = await rerankCandidates({
+  let rerankApplied = false;
+  const allowRerankEnv = Boolean(process.env.CAPSULE_RERANKER_URL);
+  const allowRerank = options?.forceRerank === true
+    ? true
+    : options?.forceRerank === false
+      ? false
+      : allowRerankEnv && shouldRerank(results.length, vectorLatency + rewriteLatency);
+
+  let rerankLatency = 0;
+
+  if (allowRerank) {
+    const rerankedResult = await rerankCandidates({
       prompt: options?.prompt ?? '',
       query: rewrittenQuery,
       candidates: results.map((item) => ({
@@ -692,18 +716,32 @@ async function executeRecipeSearch(
         score: item.recipeScore ?? item.score ?? 0
       }))
     });
-    const scoreMap = new Map(reranked.map((item) => [item.id, item.score]));
-    results = results
-      .map((item) => ({
-        ...item,
-        recipeScore: scoreMap.get(item.id) ?? item.recipeScore ?? item.score
-      }))
-      .sort((a, b) => (b.recipeScore ?? 0) - (a.recipeScore ?? 0))
-      .slice(0, limitValue);
+    rerankLatency = rerankedResult.latencyMs;
+    if (rerankedResult.applied) {
+      const originalMap = new Map(results.map((item) => [item.id, item]));
+      results = rerankedResult.candidates
+        .map((candidate) => {
+          const original = originalMap.get(candidate.id);
+          if (!original) {
+            return {
+              id: candidate.id,
+              content: candidate.content,
+              score: candidate.score,
+              recipeScore: candidate.score
+            } as ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean };
+          }
+          return {
+            ...original,
+            recipeScore: candidate.score
+          };
+        })
+        .slice(0, limitValue);
+      rerankApplied = true;
+    }
   }
 
-  const rewriteNote = rewrittenQuery !== queryString ? ' (rewritten)' : '';
-  const rerankNote = process.env.CAPSULE_RERANKER_URL ? ' (reranked)' : '';
+  const rewriteNote = rewriteApplied ? ' (rewritten)' : '';
+  const rerankNote = rerankApplied ? ' (reranked)' : '';
   const explanation =
     `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} item(s)${rewriteNote}${rerankNote}.`;
 
@@ -713,6 +751,10 @@ async function executeRecipeSearch(
     limit: limitValue,
     candidateLimit,
     resultCount: results.length,
+    rewriteApplied,
+    rerankApplied,
+    rewriteLatencyMs: Math.round(rewriteLatency),
+    rerankLatencyMs: Math.round(rerankLatency),
     event: logEvent
   });
 
@@ -720,7 +762,13 @@ async function executeRecipeSearch(
     query: queryString,
     results,
     recipe: recipe.name,
-    explanation
+    explanation,
+    metrics: {
+      rewriteApplied,
+      rewriteLatencyMs: Math.round(rewriteLatency),
+      rerankApplied,
+      rerankLatencyMs: Math.round(rerankLatency)
+    }
   };
 }
 
@@ -783,10 +831,13 @@ async function createMemory(
   const typeValue = resolveTypeValue(input.type ?? null);
   const sourceValue = resolveSource(input.source ?? undefined);
   const aclValue = resolveAcl(input.acl ?? null, scope.subjectId);
+  if (aclValue.visibility === 'shared' && (!aclValue.subjects || aclValue.subjects.length === 0)) {
+    throw new Error('Shared memories must include at least one subject in acl.subjects.');
+  }
   const piiFlagsValue = resolvePiiFlags(input.piiFlags ?? undefined);
 
-  if (hasSensitivePii(piiFlagsValue) && aclValue.visibility === 'public') {
-    throw new Error('Cannot store PII when ACL visibility is public. Choose a private or shared scope.');
+  if (hasSensitivePii(piiFlagsValue) && aclValue.visibility !== 'private') {
+    throw new Error('PII memories must remain private.');
   }
 
   const policyContext = {
@@ -987,16 +1038,24 @@ async function listMemories(
 async function searchMemories(
   scope: TenantScope,
   queryString: string,
-  options?: { limit?: number; recipe?: string; prompt?: string }
+  options?: { limit?: number; recipe?: string; prompt?: string; forceRewrite?: boolean; forceRerank?: boolean }
 ): Promise<{
   query: string;
   results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean }>;
   recipe: string;
   explanation: string;
+  metrics: {
+    rewriteApplied: boolean;
+    rewriteLatencyMs: number;
+    rerankApplied: boolean;
+    rerankLatencyMs: number;
+  };
 }> {
   const recipe = getSearchRecipe(options?.recipe);
   return executeRecipeSearch(scope, recipe, queryString, options?.limit, 'capsule.recipe.usage', {
-    prompt: options?.prompt ?? queryString
+    prompt: options?.prompt ?? queryString,
+    forceRewrite: options?.forceRewrite,
+    forceRerank: options?.forceRerank
   });
 }
 
@@ -1005,11 +1064,14 @@ async function previewRecipeSearch(
   recipeDefinition: z.infer<typeof recipeDefinitionSchema>,
   queryString: string,
   limit?: number,
-  prompt?: string
+  prompt?: string,
+  overrides?: { forceRewrite?: boolean; forceRerank?: boolean }
 ) {
   const recipe = buildRecipeFromDefinition(recipeDefinition);
   return executeRecipeSearch(scope, recipe, queryString, limit, 'capsule.recipe.preview', {
-    prompt: prompt ?? queryString
+    prompt: prompt ?? queryString,
+    forceRewrite: overrides?.forceRewrite,
+    forceRerank: overrides?.forceRerank
   });
 }
 
@@ -1204,12 +1266,15 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   if (acl !== undefined) {
     mutated = true;
     const resolvedAcl = resolveAcl(acl ?? null, existingDoc?.subjectId ?? scope.subjectId);
+    if (resolvedAcl.visibility === 'shared' && (!resolvedAcl.subjects || resolvedAcl.subjects.length === 0)) {
+      throw new Error('Shared memories must include at least one subject in acl.subjects.');
+    }
     if (
-      resolvedAcl.visibility === 'public' &&
+      resolvedAcl.visibility !== 'private' &&
       piiFlags === undefined &&
       hasSensitivePii(resolveStoredPiiFlags(existingDoc, scope.byokKey))
     ) {
-      throw new Error('Cannot set visibility to public while PII flags remain. Clear PII or choose a private scope.');
+      throw new Error('Cannot expose PII beyond private scope. Clear PII or adjust ACL.');
     }
     update.acl = resolvedAcl;
     response.acl = resolvedAcl;
@@ -1223,8 +1288,8 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
       (update.acl as CapsuleAcl | undefined) ??
       existingDoc?.acl ??
       resolveAcl(null, scope.subjectId);
-    if (hasSensitivePii(resolvedFlags) && effectiveAcl.visibility === 'public') {
-      throw new Error('Cannot store PII when ACL visibility is public. Choose a private or shared scope.');
+    if (hasSensitivePii(resolvedFlags) && effectiveAcl.visibility !== 'private') {
+      throw new Error('Cannot expose PII beyond private scope.');
     }
 
     if (resolvedFlags && Object.keys(resolvedFlags).length > 0) {
@@ -1506,7 +1571,7 @@ const apiRoutes: RouteDefinition[] = [
   {
     path: '/v1/memories/search',
     handlers: {
-      post: withAuth(async (params, scope) => {
+      post: withAuth(async (params, scope, headers) => {
         const body = typeof params.body === 'object' && params.body ? params.body : {};
         const parsed = searchMemorySchema.parse({
           ...body,
@@ -1515,10 +1580,18 @@ const apiRoutes: RouteDefinition[] = [
           subjectId: scope.subjectId
         });
         const tenant = ensureTenant(parsed, { allowFallback: false });
+        const rewriteHeader = headers['x-capsule-rewrite'];
+        const rerankHeader = headers['x-capsule-rerank'];
+        const forceRewrite =
+          rewriteHeader === 'true' ? true : rewriteHeader === 'false' ? false : undefined;
+        const forceRerank =
+          rerankHeader === 'true' ? true : rerankHeader === 'false' ? false : undefined;
         const result = await searchMemories(tenant, parsed.query, {
           limit: parsed.limit,
           recipe: parsed.recipe,
-          prompt: parsed.prompt
+          prompt: parsed.prompt,
+          forceRewrite,
+          forceRerank
         });
         return buildResponse(result);
       })
@@ -1533,7 +1606,7 @@ const apiRoutes: RouteDefinition[] = [
   {
     path: '/v1/memories/recipes/preview',
     handlers: {
-      post: withAuth(async (params, scope) => {
+      post: withAuth(async (params, scope, headers) => {
         const body = typeof params.body === 'object' && params.body ? params.body : {};
         const parsed = recipePreviewSchema.parse({
           ...body,
@@ -1542,7 +1615,23 @@ const apiRoutes: RouteDefinition[] = [
           subjectId: scope.subjectId
         });
         const tenant = ensureTenant(parsed, { allowFallback: false });
-        const result = await previewRecipeSearch(tenant, parsed.recipe, parsed.query, parsed.limit, parsed.prompt);
+        const rewriteHeader = headers['x-capsule-rewrite'];
+        const rerankHeader = headers['x-capsule-rerank'];
+        const forceRewrite =
+          rewriteHeader === 'true' ? true : rewriteHeader === 'false' ? false : undefined;
+        const forceRerank =
+          rerankHeader === 'true' ? true : rerankHeader === 'false' ? false : undefined;
+        const result = await previewRecipeSearch(
+          tenant,
+          parsed.recipe,
+          parsed.query,
+          parsed.limit,
+          parsed.prompt,
+          {
+            forceRewrite,
+            forceRerank
+          }
+        );
         return buildResponse(result);
       })
     }

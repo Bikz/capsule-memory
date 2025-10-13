@@ -16,5 +16,7 @@ _Last updated: 2024-05-07_
 - Vector backend is pluggable (`CAPSULE_VECTOR_STORE`), defaulting to MongoDB. pgvector/Qdrant adapters log fallbacks until wired.
 - Connector catalog is now centralized (`config/connectors.json`) and reused by the CLI and server module.
 - Recipe preview endpoints allow JSON-defined blends for Studio experimentation; production recipes remain typed.
+- Adaptive retrieval toggles live in `config/adaptive.json` and can be evaluated via `npm run eval:retrieval`.
+- Capsule Local reads `capsule-local.config.json`, exposes `/local/manifest`, and can sync via `npm run local:sync`.
 
 Keep `docs/prioritized-todo.md` updated as sprint scope evolves.

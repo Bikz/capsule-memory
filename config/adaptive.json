@@ -1,0 +1,12 @@
+{
+  "rewrite": {
+    "enabled": true,
+    "minQueryLength": 8,
+    "latencyBudgetMs": 350
+  },
+  "rerank": {
+    "enabled": true,
+    "maxResults": 50,
+    "latencyBudgetMs": 500
+  }
+}

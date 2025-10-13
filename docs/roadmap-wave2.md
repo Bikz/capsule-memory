@@ -12,5 +12,6 @@
    - BYOK reach: metadata + embeddings, key rotation docs, admin tooling.
    - Row-level ACL management: Studio UI, audit logging, policy templates.
    - PII gating: write-time policies, connector compliance visibility.
+   - Embedding encryption: evaluate encrypt-at-rest options for stored vectors and migration guidance.
 
 Stay aligned with `docs/status.md` and `docs/prioritized-todo.md` as work progresses.

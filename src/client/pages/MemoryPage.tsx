@@ -41,6 +41,12 @@ type SearchMemoryResponse = {
   recipe: string;
   results: Array<MemoryItem & { score?: number; recipeScore?: number; graphHit?: boolean }>;
   explanation: string;
+  metrics?: {
+    rewriteApplied: boolean;
+    rewriteLatencyMs: number;
+    rerankApplied: boolean;
+    rerankLatencyMs: number;
+  };
 };
 
 type DeleteMemoryResponse = {
@@ -328,6 +334,18 @@ export default function MemoryPage(): JSX.Element {
           {searchMemoryMutation.data ? (
             <div className="mt-6 space-y-3">
               <p className="text-sm text-slate-300">{searchMemoryMutation.data.explanation}</p>
+              {searchMemoryMutation.data.metrics ? (
+                <div className="flex flex-wrap gap-3 text-xs uppercase tracking-wide text-slate-500">
+                  <span>
+                    rewrite: {searchMemoryMutation.data.metrics.rewriteApplied ? 'on' : 'off'}
+                    {` (${searchMemoryMutation.data.metrics.rewriteLatencyMs}ms)`}
+                  </span>
+                  <span>
+                    rerank: {searchMemoryMutation.data.metrics.rerankApplied ? 'on' : 'off'}
+                    {` (${searchMemoryMutation.data.metrics.rerankLatencyMs}ms)`}
+                  </span>
+                </div>
+              ) : null}
               {searchMemoryMutation.data.results.length === 0 ? (
                 <p className="text-slate-400">No memories matched your query.</p>
               ) : (

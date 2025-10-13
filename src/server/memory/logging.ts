@@ -57,6 +57,10 @@ export function logRecipeUsage(params: {
   limit: number;
   candidateLimit: number;
   resultCount: number;
+  rewriteApplied?: boolean;
+  rerankApplied?: boolean;
+  rewriteLatencyMs?: number;
+  rerankLatencyMs?: number;
   event?: string;
 }) {
   if (!RECIPE_LOG_ENABLED) {
@@ -68,7 +72,11 @@ export function logRecipeUsage(params: {
     recipe: params.recipe.name,
     limit: params.limit,
     candidateLimit: params.candidateLimit,
-    resultCount: params.resultCount
+    resultCount: params.resultCount,
+    rewriteApplied: params.rewriteApplied ?? false,
+    rerankApplied: params.rerankApplied ?? false,
+    rewriteLatencyMs: params.rewriteLatencyMs ?? null,
+    rerankLatencyMs: params.rerankLatencyMs ?? null
   };
 
   console.info(JSON.stringify(payload));
