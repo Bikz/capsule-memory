@@ -21,8 +21,11 @@
     "ingest": "node tools/capsule-ingest.mjs",
     "local": "node tools/capsule-local.mjs",
     "local:sync": "node tools/capsule-local-sync.mjs",
+    "local:data": "node tools/capsule-local-data.mjs",
+    "local:bundle": "node tools/capsule-local-bundle.mjs",
     "eval:retrieval": "tsx src/tools/evaluateRetrieval.ts",
-    "local:manifest": "node tools/capsule-local-manifest.mjs"
+    "local:manifest": "node tools/capsule-local-manifest.mjs",
+    "check:pii": "node tools/pii-policy-check.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",

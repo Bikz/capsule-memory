@@ -85,6 +85,13 @@ export class CapsuleMemoryClient {
         return this.request(`/v1/memories${qs}`, { method: "GET", subjectId: input.subjectId });
     }
     async search(input) {
+        const headers = {};
+        if (typeof input.rewrite === "boolean") {
+            headers["X-Capsule-Rewrite"] = String(input.rewrite);
+        }
+        if (typeof input.rerank === "boolean") {
+            headers["X-Capsule-Rerank"] = String(input.rerank);
+        }
         return this.request("/v1/memories/search", {
             method: "POST",
             body: JSON.stringify({
@@ -93,7 +100,8 @@ export class CapsuleMemoryClient {
                 recipe: input.recipe,
                 prompt: input.prompt
             }),
-            subjectId: input.subjectId
+            subjectId: input.subjectId,
+            headers
         });
     }
     async listSearchRecipes() {

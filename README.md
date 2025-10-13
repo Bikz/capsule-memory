@@ -107,8 +107,20 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run ingest` | Run the connector ingest helper for Notion/Drive exports (uses `config/connectors.json`). |
 | `npm run local` | Start the Capsule Local SQLite cache service for offline use. |
 | `npm run local:sync` | Sync memories between cloud Capsule and Capsule Local (pull/push). |
+| `npm run local:data` | Export or import Capsule Local memories as JSON backups. |
+| `npm run local:bundle` | Build a distributable Capsule Local bundle (config + manifest + scripts). |
 | `npm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
 | `npm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
+| `npm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
+
+### Validation checklist
+
+Run these commands before sending a PR or deploying changes:
+
+- `npx tsc --noEmit` – TypeScript structural check for the server, tools, and SDK packages.
+- `npm run lint` – Lint the codebase (run `npm init @eslint/config` first if ESLint isn't configured locally).
+- `npm run eval:retrieval -- --dataset <path>` – Spot-check adaptive retrieval behaviour on a pinned dataset.
+- `npm run check:pii` – (Requires `MONGO_URL`) ensure no public/shared memories retain PII flags.
 
 ### Backfill existing memories
 
@@ -133,10 +145,16 @@ The script respects `MONGO_DB` if you need to target a specific database within 
   access.
 - **Metadata encryption**: set `CAPSULE_META_ENCRYPTION_KEY` (32-byte key, UTF-8 or base64) to encrypt `piiFlags` at rest. The key
   is required to read or mutate encrypted flags—store it securely (e.g., in your KMS).
-- **Bring-your-own key**: supply an `X-Capsule-BYOK` header per request to encrypt/decrypt metadata with customer-managed keys.
+- **Bring-your-own key**: supply an `X-Capsule-BYOK` header per request to encrypt/decrypt metadata with customer-managed keys. The
+  server threads this header through storage, search, and update flows so decryptors always honour the active key.
+- **BYOK rotation**: 1) issue a new key in your KMS, 2) replay write/update calls with both the previous and new keys (Capsule
+  decrypts with the header-provided key, re-encrypts with the same header), 3) once re-encryption completes, revoke the old key.
+  During rotation, route traffic with the new header value to avoid mixed ciphertext.
 - **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
   events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
 - **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
+- **PII compliance checks**: run `npm run check:pii` (requires `MONGO_URL`) to surface any non-private memories that still contain
+  PII flags or encrypted PII metadata.
 
 ### Capsule Router quick-start
 
@@ -224,17 +242,40 @@ Generate an MCP manifest pointing at the local cache:
 npm run local:manifest   # writes capsule-local.mcp.json
 ```
 
+### Export or import Capsule Local data
+
+Create JSON backups (or reload them) without running the HTTP service:
+
+```bash
+npm run local:data -- --export backup.json   # dump all local memories
+npm run local:data -- --import backup.json   # restore from backup
+```
+
+The JSON format mirrors the SQLite schema (`id`, `content`, `pinned`, `created_at`, `tags`, `metadata`). Entries without an `id` receive a new ULID/UUID during import.
+
+### Bundle Capsule Local for distribution
+
+Package the local service, config, and manifest into a tarball:
+
+```bash
+npm run local:bundle
+```
+
+The script stages assets under `dist/capsule-local-bundle/` and produces `dist/capsule-local-bundle.tar.gz` for sharing with teammates or packaging into an Electron build.
+
 ### Vector backend controls
 
 Set `CAPSULE_VECTOR_STORE` to `mongo`, `pgvector`, or `qdrant` to toggle candidate selection. The Mongo-backed path remains default; other values log fallbacks until adapters are wired in. Tune the hotset cache with `CAPSULE_HOTSET_SIZE` (entries) and `CAPSULE_HOTSET_TTL` (ms) to balance latency and freshness.
 
 ### Adaptive retrieval knobs
 
-- `CAPSULE_REWRITER_URL` / `CAPSULE_REWRITER_KEY` – point the query rewriter at your hosted service (fallback heuristics remain in place).
+- `config/adaptive.json` – centralise defaults for rewrite/rerank enablement, latency budgets, and result thresholds. Override per-deploy via `CAPSULE_ADAPTIVE_CONFIG`.
+- `CAPSULE_REWRITER_URL` / `CAPSULE_REWRITER_KEY` – point the query rewriter at your hosted service (heuristic fallbacks remain in place).
 - `CAPSULE_RERANKER_URL` / `CAPSULE_RERANKER_KEY` – plug in a learned reranker; when omitted Capsule falls back to recipe-weighted scores.
+- `CAPSULE_REWRITE_ENABLED` / `CAPSULE_RERANK_ENABLED` – force-enable/disable adaptive steps regardless of config defaults.
 - `CAPSULE_REWRITER_TTL` / `CAPSULE_REWRITER_CACHE` – control the rewrite cache TTL and max entries.
 
-Run `npm run eval:retrieval` to benchmark rewrite/rerank impact on a dataset (outputs JSON summary for dashboards).
+Run `npm run eval:retrieval -- --dataset datasets/sample.json --rewrite --csv results.csv` to benchmark adaptive settings. The evaluator accepts `--rewrite/--no-rewrite` and `--rerank/--no-rerank` overrides (sent via `X-Capsule-Rewrite` / `X-Capsule-Rerank` headers) and emits both JSON summaries (`--output summary.json`) and row-level CSV metrics (`--csv results.csv`).
 
 For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/status.md` for the latest roadmap progress.
 

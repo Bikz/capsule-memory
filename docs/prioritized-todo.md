@@ -22,6 +22,8 @@ _Last refreshed: 2024-05-07_
    - Row-level ACL management (shared groups, auditing, guardrails in Studio).
    - Write-time PII gating policies with reporting and connector compliance checks.
 
+_Self-starter review (2024-05-07): Adaptive retrieval overrides, Capsule Local bundling, and PII audit tooling landed; no additional Wave 2 blockers discovered beyond embedding-encryption rollout._
+
 ## 🌉 Wave 3 Preview
 - Programmable storage v2 (lifecycles, summarisation DAGs, proof-of-recall).
 - Capsule Federation (multi-region brokers, BYO embeddings).

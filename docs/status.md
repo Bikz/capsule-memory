@@ -17,6 +17,10 @@ _Last updated: 2024-05-07_
 - Connector catalog is now centralized (`config/connectors.json`) and reused by the CLI and server module.
 - Recipe preview endpoints allow JSON-defined blends for Studio experimentation; production recipes remain typed.
 - Adaptive retrieval toggles live in `config/adaptive.json` and can be evaluated via `npm run eval:retrieval`.
+- Retrieval evaluator now supports forced rewrite/rerank runs (`--rewrite`, `--no-rewrite`, `--rerank`, `--no-rerank`) and CSV output for dashboard imports.
 - Capsule Local reads `capsule-local.config.json`, exposes `/local/manifest`, and can sync via `npm run local:sync`.
+- Capsule Local packaging helpers: `npm run local:data` handles JSON export/import, and `npm run local:bundle` emits a distributable archive with config + manifest.
+- Security tooling: BYOK guidance now covers rotation steps and `npm run check:pii` audits for non-private PII.
+- Validation baseline: run `npx tsc --noEmit`, `npm run lint` (after bootstrapping ESLint), `npm run eval:retrieval`, and `npm run check:pii` before releases.
 
 Keep `docs/prioritized-todo.md` updated as sprint scope evolves.

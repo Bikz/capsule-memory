@@ -13,14 +13,14 @@ type DatasetSample = {
   note?: string;
 };
 
- type EvaluationOptions = {
+type EvaluationOptions = {
   rewrite?: boolean;
   rerank?: boolean;
   limit?: number;
   recipe?: string;
 };
 
- type EvaluationRecord = {
+type EvaluationRecord = {
   id: string;
   query: string;
   prompt?: string;
@@ -30,6 +30,8 @@ type DatasetSample = {
   results: Array<{ id: string; content: string; score?: number }>;
   hit: boolean | null;
   explanation: string;
+  rewriteLatencyMs?: number;
+  rerankLatencyMs?: number;
 };
 
 const API_BASE = (process.env.CAPSULE_MEMORY_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -55,7 +57,7 @@ async function loadDataset(datasetPath: string): Promise<DatasetSample[]> {
 }
 
 function parseArgs(argv: string[]) {
-  const args: EvaluationOptions & { dataset?: string; output?: string } = {};
+  const args: EvaluationOptions & { dataset?: string; output?: string; csv?: string } = {};
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     switch (token) {
@@ -87,6 +89,9 @@ function parseArgs(argv: string[]) {
       case '-o':
         args.output = argv[++i];
         break;
+      case '--csv':
+        args.csv = argv[++i];
+        break;
       case '--help':
       case '-h':
         printHelp();
@@ -99,7 +104,7 @@ function parseArgs(argv: string[]) {
 }
 
 function printHelp() {
-  console.log(`Capsule Adaptive Retrieval Eval\n\nUsage: tsx src/tools/evaluateRetrieval.ts --dataset datasets/sample.json [--rewrite] [--rerank]\n\nOptions:\n  --dataset, -d   Path to dataset JSON (required).\n  --recipe, -r    Search recipe (default: default-semantic).\n  --limit, -l     Top-k limit (default: recipe limit).\n  --rewrite       Force rewrite on (default honours server config).\n  --rerank        Force reranker on (default honours server config).\n  --output, -o    Path to write results JSON.\n`);
+  console.log(`Capsule Adaptive Retrieval Eval\n\nUsage: tsx src/tools/evaluateRetrieval.ts --dataset datasets/sample.json [--rewrite] [--rerank]\n\nOptions:\n  --dataset, -d   Path to dataset JSON (required).\n  --recipe, -r    Search recipe (default: default-semantic).\n  --limit, -l     Top-k limit (default: recipe limit).\n  --rewrite       Force rewrite on (default honours server config).\n  --no-rewrite    Force rewrite off (default honours server config).\n  --rerank        Force reranker on (default honours server config).\n  --no-rerank     Force reranker off (default honours server config).\n  --output, -o    Path to write results JSON summary.\n  --csv           Path to write row-level CSV results.\n`);
 }
 
 async function run() {
@@ -121,6 +126,10 @@ async function run() {
   const results: EvaluationRecord[] = [];
   let hits = 0;
   let totalLatency = 0;
+  let rewriteAppliedCount = 0;
+  let rerankAppliedCount = 0;
+  let rewriteLatencyTotal = 0;
+  let rerankLatencyTotal = 0;
 
   for (const sample of dataset) {
     const start = performance.now();
@@ -128,11 +137,28 @@ async function run() {
       query: sample.query,
       prompt: sample.prompt,
       limit: args.limit,
-      recipe: args.recipe
+      recipe: args.recipe,
+      rewrite: args.rewrite,
+      rerank: args.rerank
     });
     const typed = response as any;
     const latencyMs = performance.now() - start;
     totalLatency += latencyMs;
+    const metrics = typed.metrics ?? {};
+    const rewriteApplied = Boolean(metrics.rewriteApplied);
+    const rerankApplied = Boolean(metrics.rerankApplied);
+    if (rewriteApplied) {
+      rewriteAppliedCount += 1;
+    }
+    if (rerankApplied) {
+      rerankAppliedCount += 1;
+    }
+    if (typeof metrics.rewriteLatencyMs === 'number') {
+      rewriteLatencyTotal += metrics.rewriteLatencyMs;
+    }
+    if (typeof metrics.rerankLatencyMs === 'number') {
+      rerankLatencyTotal += metrics.rerankLatencyMs;
+    }
 
     const best = typed.results?.[0];
     const hit = sample.expected
@@ -146,8 +172,8 @@ async function run() {
       id: sample.id,
       query: sample.query,
       prompt: sample.prompt,
-      rewriteUsed: (typed.explanation || '').includes('rewritten'),
-      rerankUsed: (typed.explanation || '').includes('reranked'),
+      rewriteUsed: rewriteApplied || (typed.explanation || '').includes('rewritten'),
+      rerankUsed: rerankApplied || (typed.explanation || '').includes('reranked'),
       latencyMs: Math.round(latencyMs),
       results: (typed.results || []).map((item: any) => ({
         id: item.id,
@@ -155,7 +181,9 @@ async function run() {
         score: item.recipeScore ?? item.score
       })),
       hit,
-      explanation: typed.explanation
+      explanation: typed.explanation,
+      rewriteLatencyMs: metrics.rewriteLatencyMs,
+      rerankLatencyMs: metrics.rerankLatencyMs
     });
   }
 
@@ -166,6 +194,12 @@ async function run() {
       ? hits / dataset.filter((s) => s.expected).length
       : null,
     avgLatencyMs: dataset.length > 0 ? Math.round(totalLatency / dataset.length) : null,
+    rewriteAppliedRate: dataset.length > 0 ? rewriteAppliedCount / dataset.length : null,
+    rerankAppliedRate: dataset.length > 0 ? rerankAppliedCount / dataset.length : null,
+    avgRewriteLatencyMs:
+      rewriteAppliedCount > 0 ? Math.round(rewriteLatencyTotal / rewriteAppliedCount) : null,
+    avgRerankLatencyMs:
+      rerankAppliedCount > 0 ? Math.round(rerankLatencyTotal / rerankAppliedCount) : null,
     options: {
       recipe: args.recipe ?? 'default-semantic',
       limit: args.limit,
@@ -180,6 +214,25 @@ async function run() {
     console.log(`Wrote summary to ${args.output}`);
   } else {
     console.log(JSON.stringify(summary, null, 2));
+  }
+
+  if (args.csv) {
+    const csvRows = ['id,query,hit,rewriteUsed,rerankUsed,latencyMs,rewriteLatencyMs,rerankLatencyMs'];
+    for (const record of results) {
+      const cells = [
+        JSON.stringify(record.id),
+        JSON.stringify(record.query),
+        record.hit === null ? 'NA' : String(record.hit),
+        String(record.rewriteUsed),
+        String(record.rerankUsed),
+        String(record.latencyMs),
+        record.rewriteLatencyMs != null ? String(record.rewriteLatencyMs) : '',
+        record.rerankLatencyMs != null ? String(record.rerankLatencyMs) : ''
+      ];
+      csvRows.push(cells.join(','));
+    }
+    await fs.writeFile(path.resolve(process.cwd(), args.csv), `${csvRows.join('\n')}\n`);
+    console.log(`Wrote CSV results to ${args.csv}`);
   }
 }
 

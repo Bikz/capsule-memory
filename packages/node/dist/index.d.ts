@@ -73,6 +73,8 @@ export type SearchInput = {
     recipe?: string;
     prompt?: string;
     subjectId?: string;
+    rewrite?: boolean;
+    rerank?: boolean;
 };
 export type ListInput = {
     limit?: number;
