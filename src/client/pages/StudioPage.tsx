@@ -74,6 +74,41 @@ type PolicyPreviewResponse = {
   appliedPolicies: string[];
 };
 
+type ConnectorSummary = {
+  id: string;
+  provider: string;
+  label: string;
+  description?: string;
+  docs?: string;
+  env?: string[];
+  tags?: string[];
+  latestJob: {
+    id: string;
+    status: string;
+    itemCount: number;
+    updatedAt: string;
+    error: string | null;
+  } | null;
+};
+
+type ConnectorListResponse = {
+  connectors: ConnectorSummary[];
+};
+
+type ConnectorJobsResponse = {
+  jobs: Array<{
+    id: string;
+    connectorId: string;
+    provider: string;
+    status: string;
+    itemCount?: number;
+    error?: string;
+    dataset?: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
 function useTenant(): Tenant {
   return useMemo(
     () => ({
@@ -89,7 +124,7 @@ function useTenant(): Tenant {
 
 export default function StudioPage(): JSX.Element {
   const tenant = useTenant();
-  const [activeTab, setActiveTab] = useState<'recipes' | 'policies'>('recipes');
+  const [activeTab, setActiveTab] = useState<'recipes' | 'policies' | 'connectors'>('recipes');
 
   const recipesQuery = useQuery<ListRecipesResponse>({
     queryKey: ['memory.listSearchRecipes'],
@@ -99,6 +134,18 @@ export default function StudioPage(): JSX.Element {
   const policiesQuery = useQuery<ListPoliciesResponse>({
     queryKey: ['memory.listStoragePolicies'],
     queryFn: () => callMethod('memory.listStoragePolicies', tenant)
+  });
+
+  const connectorsQuery = useQuery<ConnectorListResponse>({
+    queryKey: ['connectors.listConnectors'],
+    queryFn: () => callMethod('connectors.listConnectors', {}),
+    refetchInterval: 15000
+  });
+
+  const connectorJobsQuery = useQuery<ConnectorJobsResponse>({
+    queryKey: ['connectors.listJobs'],
+    queryFn: () => callMethod('connectors.listJobs', { limit: 50 }),
+    refetchInterval: 10000
   });
 
   const [selectedRecipeName, setSelectedRecipeName] = useState<string | null>(null);
@@ -136,9 +183,23 @@ export default function StudioPage(): JSX.Element {
         tags: variables.tags && variables.tags.length > 0 ? variables.tags : undefined,
         pinned: variables.pinned,
         source: variables.connector ? { connector: variables.connector } : undefined,
-        acl: variables.acl ? { visibility: variables.acl as 'private' | 'shared' | 'public' } : undefined
+      acl: variables.acl ? { visibility: variables.acl as 'private' | 'shared' | 'public' } : undefined
       })
   });
+
+  const scheduleConnectorMutation = useMutation<{ jobId: string }, Error, { connectorId: string; dataset?: string }>(
+    {
+      mutationFn: (variables) =>
+        callMethod('connectors.scheduleIngestion', {
+          connectorId: variables.connectorId,
+          dataset: variables.dataset
+        }),
+      onSuccess: () => {
+        connectorJobsQuery.refetch();
+        connectorsQuery.refetch();
+      }
+    }
+  );
 
   useEffect(() => {
     if (!recipesQuery.data || recipesQuery.data.recipes.length === 0) {
@@ -196,6 +257,11 @@ export default function StudioPage(): JSX.Element {
       connector: policyConnector || undefined,
       acl: policyAcl
     });
+  };
+
+  const onScheduleIngestion = (connectorId: string) => {
+    const dataset = window.prompt('Dataset label (optional):') ?? undefined;
+    scheduleConnectorMutation.mutate({ connectorId, dataset: dataset || undefined });
   };
 
   const renderRecipesTab = () => {
@@ -455,6 +521,104 @@ export default function StudioPage(): JSX.Element {
     );
   };
 
+  const renderConnectorsTab = () => {
+    if (connectorsQuery.isLoading || connectorJobsQuery.isLoading) {
+      return (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      );
+    }
+
+    if (connectorsQuery.isError || !connectorsQuery.data) {
+      return <p className="text-red-400">Failed to load connector catalog.</p>;
+    }
+
+    const jobs = connectorJobsQuery.data?.jobs ?? [];
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-white">Connector ingestion monitor</h2>
+          <p className="text-slate-300">
+            Trigger connector syncs and monitor their status. Use the CLI (`npm run ingest`) for full fetch cycles—
+            each run records a job that appears here for auditing and retries.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {connectorsQuery.data.connectors.map((connector) => (
+            <div key={connector.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-lg shadow-slate-900/40">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">{connector.label}</h3>
+                  <p className="mt-1 text-sm text-slate-300">{connector.description}</p>
+                  <p className="mt-2 text-xs text-slate-400">ENV: {connector.env?.join(', ') ?? 'n/a'}</p>
+                  {connector.tags && connector.tags.length > 0 ? (
+                    <p className="mt-1 text-xs uppercase tracking-wide text-indigo-300">{connector.tags.join(' • ')}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onScheduleIngestion(connector.id)}
+                  className="inline-flex items-center rounded-lg bg-indigo-500 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-indigo-400"
+                  disabled={scheduleConnectorMutation.isPending}
+                >
+                  Schedule job
+                </button>
+              </div>
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300">
+                <p>
+                  Latest status:{' '}
+                  {connector.latestJob
+                    ? `${connector.latestJob.status} • ${connector.latestJob.updatedAt}`
+                    : 'no runs yet'}
+                </p>
+                {connector.latestJob?.error ? (
+                  <p className="mt-1 text-red-400">{connector.latestJob.error}</p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">
+          <table className="min-w-full divide-y divide-slate-800 text-sm">
+            <thead className="bg-slate-900 text-slate-300">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold">Job</th>
+                <th className="px-4 py-3 text-left font-semibold">Connector</th>
+                <th className="px-4 py-3 text-left font-semibold">Status</th>
+                <th className="px-4 py-3 text-left font-semibold">Items</th>
+                <th className="px-4 py-3 text-left font-semibold">Updated</th>
+                <th className="px-4 py-3 text-left font-semibold">Error</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800 text-slate-200">
+              {jobs.map((job) => (
+                <tr key={job.id}>
+                  <td className="px-4 py-3 text-xs font-mono">{job.id}</td>
+                  <td className="px-4 py-3">{job.connectorId}</td>
+                  <td className="px-4 py-3">{job.status}</td>
+                  <td className="px-4 py-3">{job.itemCount ?? '—'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-400">{new Date(job.updatedAt).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-xs text-red-400">{job.error ?? ''}</td>
+                </tr>
+              ))}
+              {jobs.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-center text-slate-400" colSpan={6}>
+                    No ingestion jobs yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto max-w-6xl px-6 py-10 space-y-8">
@@ -488,9 +652,24 @@ export default function StudioPage(): JSX.Element {
           >
             Storage policies
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('connectors')}
+            className={`px-4 py-2 text-sm font-semibold transition ${
+              activeTab === 'connectors'
+                ? 'border-b-2 border-indigo-400 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Connectors & ingest
+          </button>
         </div>
 
-        {activeTab === 'recipes' ? renderRecipesTab() : renderPoliciesTab()}
+        {activeTab === 'recipes'
+          ? renderRecipesTab()
+          : activeTab === 'policies'
+            ? renderPoliciesTab()
+            : renderConnectorsTab()}
       </div>
     </div>
   );

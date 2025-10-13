@@ -4,6 +4,7 @@ import fsPromises from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { performance } from 'node:perf_hooks';
 
 import { CapsuleMemoryClient } from '../packages/node/dist/index.js';
 

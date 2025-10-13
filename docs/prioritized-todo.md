@@ -7,23 +7,20 @@
 - [x] Observability & safeguards: structured policy/recipe logs, hardening of API guards, and migration/backfill scripts.
 
 ## 🚀 Sprint 1 (Wave 1 parity still outstanding)
-1. **Capsule Router & MCP polish** (roadmap items 5 & Sprint 2 pre-req)
-   - One-command router setup with templated recipes/policies.
-   - Streamlined MCP packaging + docs to guarantee <5 min TTFV.
-2. **Studio UX for policies & recipes** (roadmap item 7)
-   - Editors for search recipes/storage policies with validation + live preview.
-   - Surface provenance/audit trail (incl. policy decisions) in the console.
-3. **Capsule Bench (eval harness)** (roadmap item 10)
-   - CLI `capsule bench` for shadow benchmarking vs Mem0/Supermemory.
-   - Metrics ingest + dashboard wiring for latency/quality tracking.
+1. [x] **Capsule Router & MCP polish** (roadmap item 5)
+   - Router CLI proxy with templated config + MCP manifest generator for <5 min TTFV.
+2. [x] **Studio UX for policies & recipes** (roadmap item 7)
+   - Live recipe/policy editors with previews and provenance surfacing in Capsule Studio.
+3. [x] **Capsule Bench (eval harness)** (roadmap item 10)
+   - CLI + dataset scaffolding for latency/quality benchmarking and shadow-mode logging.
 
 ## 🧭 Sprint 2 (Wave 1 completion & Wave 2 kickoff)
-1. **Connectors: Notion & Google Drive** (roadmap item 6)
-   - OAuth + webhook/polling ingest, tagging, retry queues, ingest monitor.
-2. **Capsule-Graph read-only enrichment** (roadmap item 4)
-   - Async entity/relation extraction pipeline with `graph_expand` recipe step toggle.
-3. **Latency & scalability program groundwork** (roadmap item 9)
-   - Baseline pgvector/Qdrant adapters, hotset caching prototype, SLA dashboards.
+1. [x] **Connectors: Notion & Google Drive** (roadmap item 6)
+   - Ingestion job tracking module, CLI (`npm run ingest`) for exports, tagging, and Studio monitor view.
+2. [x] **Capsule-Graph read-only enrichment** (roadmap item 4)
+   - Async entity extraction queue, graph entity store, and recipe-level `graphExpand` support.
+3. [x] **Latency & scalability groundwork** (roadmap item 9)
+   - Vector backend configuration switches, hotset caching, and vector metric logging for future pgvector/Qdrant adapters.
 
 ## 🌉 Near-Term Wave 2 (post-parity acceleration)
 - **Adaptive retrieval** – query rewriting + learned rerankers with caches (roadmap item 8).

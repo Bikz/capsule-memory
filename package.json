@@ -17,7 +17,8 @@
     "backfill": "node tools/backfill-metadata.mjs",
     "policies": "node tools/policy-inspector.mjs",
     "router": "node tools/capsule-router.mjs",
-    "bench": "node tools/capsule-bench.mjs"
+    "bench": "node tools/capsule-bench.mjs",
+    "ingest": "node tools/capsule-ingest.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

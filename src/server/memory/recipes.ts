@@ -27,6 +27,10 @@ export type SearchRecipe = {
   candidateLimit: number;
   filters?: SearchRecipeFilters;
   scoring: SearchRecipeScoring;
+  graphExpand?: {
+    limit: number;
+    depth?: number;
+  };
 };
 
 const recipes: Record<SearchRecipeName, SearchRecipe> = {
@@ -67,6 +71,10 @@ const recipes: Record<SearchRecipeName, SearchRecipe> = {
     candidateLimit: 500,
     filters: {
       graphEnrich: true
+    },
+    graphExpand: {
+      limit: 10,
+      depth: 1
     },
     scoring: {
       semanticWeight: 1,

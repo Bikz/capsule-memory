@@ -38,7 +38,8 @@ type AddMemoryResponse = {
 
 type SearchMemoryResponse = {
   query: string;
-  results: Array<MemoryItem & { score?: number }>;
+  recipe: string;
+  results: Array<MemoryItem & { score?: number; recipeScore?: number; graphHit?: boolean }>;
   explanation: string;
 };
 

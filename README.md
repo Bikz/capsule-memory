@@ -165,6 +165,20 @@ Adjust the embedded environment variables if your Capsule server runs elsewhere.
 
 The CLI prints latency statistics, optional accuracy hits (if you supply `expected` strings), and per-sample summaries. Use `--output results.json` to persist structured results.
 
+### Connector ingestion (Notion & Google Drive)
+
+Use the helper to ingest exports into Capsule Memory while tracking job status:
+
+```bash
+# Notion JSON export -> Capsule
+npm run ingest -- --connector notion --source notion-export.json --dataset "notion:customer-success"
+
+# Google Drive folder of notes -> Capsule
+npm run ingest -- --connector google-drive --source ./drive-notes --dataset "drive:onboarding"
+```
+
+Each run registers a job in `/v1/connectors` which you can monitor in Capsule Studio. Provide API credentials or local exports as needed; the CLI tags memories with the connector id so recipes/policies can target them immediately.
+
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
   and portability).

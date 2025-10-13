@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { Module, ObjectId, type RouteDefinition, type RouteParams } from 'modelence/server';
 import { z } from 'zod';
 
@@ -30,7 +31,9 @@ import {
   getSearchRecipe,
   listSearchRecipes as listRecipeCatalog
 } from './recipes';
-import { logPolicyDecision, logRecipeUsage } from './logging';
+import { scheduleGraphJob, startGraphWorker, expandResultsViaGraph } from './graph';
+import { dbGraphEntities, dbGraphJobs } from './graphDb';
+import { logPolicyDecision, logRecipeUsage, logVectorMetrics } from './logging';
 import { generateEmbedding } from './voyage';
 
 type MemoryDocument = typeof dbMemories.Doc;
@@ -257,6 +260,41 @@ const ALLOWED_API_KEYS = (process.env.CAPSULE_API_KEYS ?? 'demo-key')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
+
+class HotsetCache<T> {
+  #entries: Map<string, { value: T; expiresAt: number }> = new Map();
+  constructor(private readonly maxEntries: number, private readonly ttlMs: number) {}
+
+  get(key: string): T | undefined {
+    const entry = this.#entries.get(key);
+    if (!entry) {
+      return undefined;
+    }
+    if (entry.expiresAt < Date.now()) {
+      this.#entries.delete(key);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  set(key: string, value: T) {
+    this.#entries.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+    if (this.#entries.size > this.maxEntries) {
+      const oldestKey = this.#entries.keys().next().value;
+      if (oldestKey) {
+        this.#entries.delete(oldestKey);
+      }
+    }
+  }
+}
+
+const VECTOR_BACKEND = (process.env.CAPSULE_VECTOR_STORE ?? 'mongo').toLowerCase();
+const HOTSET_CACHE = new HotsetCache<MemoryDocument[]>(
+  Number.parseInt(process.env.CAPSULE_HOTSET_SIZE ?? '50', 10),
+  Number.parseInt(process.env.CAPSULE_HOTSET_TTL ?? '30000', 10)
+);
+
+startGraphWorker();
 
 function ensureTenant(
   input: z.infer<typeof tenantArgSchema>,
@@ -496,12 +534,49 @@ async function executeRecipeSearch(
     fetchFilter.type = { $in: recipe.filters.types };
   }
 
-  const candidates = await dbMemories.fetch(fetchFilter, {
-    sort: { createdAt: -1 },
-    limit: candidateLimit
+  const filterSignature = {
+    pinned: recipe.filters?.pinnedOnly ?? null,
+    graph: recipe.filters?.graphEnrich ?? null,
+    types: recipe.filters?.types ?? []
+  };
+  const cacheKey = JSON.stringify({ orgId: scope.orgId, projectId: scope.projectId, filterSignature, limit: candidateLimit });
+
+  let cacheHit = false;
+  let candidates: MemoryDocument[];
+  const vectorStart = performance.now();
+
+  if (VECTOR_BACKEND === 'mongo') {
+    const cached = HOTSET_CACHE.get(cacheKey);
+    if (cached) {
+      cacheHit = true;
+      candidates = [...cached];
+    } else {
+      candidates = await dbMemories.fetch(fetchFilter, {
+        sort: { createdAt: -1 },
+        limit: candidateLimit
+      });
+      HOTSET_CACHE.set(cacheKey, candidates);
+    }
+  } else {
+    console.warn(
+      `[Capsule] Vector backend "${VECTOR_BACKEND}" is not configured. Falling back to MongoDB candidate search.`
+    );
+    candidates = await dbMemories.fetch(fetchFilter, {
+      sort: { createdAt: -1 },
+      limit: candidateLimit
+    });
+  }
+
+  const vectorLatency = performance.now() - vectorStart;
+  logVectorMetrics({
+    scope,
+    backend: VECTOR_BACKEND,
+    latencyMs: Math.round(vectorLatency),
+    cacheHit,
+    candidateCount: candidates.length
   });
 
-  const results = candidates
+  let results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean }> = candidates
     .map((doc) => {
       const semanticScore = cosineSimilarity(
         queryEmbedding.embedding,
@@ -531,8 +606,33 @@ async function executeRecipeSearch(
     .map(({ doc, weightedScore, semanticScore }) => ({
       ...toClientMemory(doc),
       score: semanticScore,
-      recipeScore: weightedScore
+      recipeScore: weightedScore,
+      graphHit: false
     }));
+
+  const seenIds = new Set(results.map((item) => item.id));
+
+  if (recipe.graphExpand) {
+    const expansions = await expandResultsViaGraph({
+      orgId: scope.orgId,
+      projectId: scope.projectId,
+      baseMemoryIds: Array.from(seenIds),
+      excludeIds: seenIds,
+      limit: recipe.graphExpand.limit
+    });
+    if (expansions.length > 0) {
+      const expansionItems = expansions.map((doc) => ({
+        ...toClientMemory(doc),
+        score: 0,
+        recipeScore: 0,
+        graphHit: true
+      }));
+      results = [...results, ...expansionItems];
+      for (const expansion of expansionItems) {
+        seenIds.add(expansion.id);
+      }
+    }
+  }
 
   const explanation =
     `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
@@ -728,6 +828,15 @@ async function createMemory(
 
   const retention = await applyRetentionPolicy(scope);
 
+  if (graphEnrichValue) {
+    await scheduleGraphJob({
+      orgId: filter.orgId,
+      projectId: filter.projectId,
+      subjectId: filter.subjectId,
+      memoryId: insertedId.toString()
+    });
+  }
+
   return {
     id: insertedId.toString(),
     ...filter,
@@ -910,6 +1019,7 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
   const push: Record<string, unknown> = {};
   const response: Record<string, unknown> = {};
   let mutated = false;
+  let shouldEnqueueGraphJob = false;
 
   if (typeof pinned === 'boolean') {
     update.pinned = pinned;
@@ -1103,6 +1213,13 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
       update.graphEnrich = graphEnrichValue;
       response.storage = storageUpdate;
       response.graphEnrich = graphEnrichValue;
+
+      const previouslyEnabled = Boolean(
+        existingDoc?.graphEnrich ?? existingDoc?.storage?.graphEnrich
+      );
+      if (graphEnrichValue && !previouslyEnabled) {
+        shouldEnqueueGraphJob = true;
+      }
     }
   }
 
@@ -1133,6 +1250,15 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
 
   if (result.matchedCount === 0) {
     throw new Error('Memory not found.');
+  }
+
+  if (shouldEnqueueGraphJob) {
+    await scheduleGraphJob({
+      orgId: scope.orgId,
+      projectId: scope.projectId,
+      subjectId: scope.subjectId,
+      memoryId: id
+    });
   }
 
   return {
@@ -1414,7 +1540,7 @@ const apiRoutes: RouteDefinition[] = [
 ];
 
 export default new Module('memory', {
-  stores: [dbMemories],
+  stores: [dbMemories, dbGraphJobs, dbGraphEntities],
   routes: apiRoutes,
   queries: {
     async getMemories(args) {

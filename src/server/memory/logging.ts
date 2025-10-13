@@ -73,3 +73,21 @@ export function logRecipeUsage(params: {
 
   console.info(JSON.stringify(payload));
 }
+
+export function logVectorMetrics(params: {
+  scope: TenantScopeSummary;
+  backend: string;
+  latencyMs: number;
+  cacheHit: boolean;
+  candidateCount: number;
+}) {
+  const payload = {
+    ...baseEvent('capsule.vector.metrics', params.scope),
+    backend: params.backend,
+    latencyMs: params.latencyMs,
+    cacheHit: params.cacheHit,
+    candidateCount: params.candidateCount
+  };
+
+  console.info(JSON.stringify(payload));
+}
