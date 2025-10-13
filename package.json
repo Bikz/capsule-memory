@@ -11,10 +11,13 @@
     "build": "modelence build && npm -w @capsule-memory/node run build",
     "start": "node .modelence/build/app.mjs",
     "mcp": "node tools/capsule-memory-mcp.mjs",
+    "mcp:manifest": "node tools/capsule-memory-mcp-init.mjs",
     "lint": "eslint .",
     "test": "echo \"Error: no test specified\" && exit 1",
     "backfill": "node tools/backfill-metadata.mjs",
-    "policies": "node tools/policy-inspector.mjs"
+    "policies": "node tools/policy-inspector.mjs",
+    "router": "node tools/capsule-router.mjs",
+    "bench": "node tools/capsule-bench.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

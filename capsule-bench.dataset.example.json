@@ -1,0 +1,12 @@
+[
+  {
+    "id": "welcome-email",
+    "query": "Summarize the most important preference Alex expressed recently.",
+    "expected": "coffee" 
+  },
+  {
+    "id": "handoff",
+    "query": "List the last three pinned action items for Jamie.",
+    "expected": "action"
+  }
+]

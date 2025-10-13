@@ -1,0 +1,19 @@
+{
+  "port": 8787,
+  "upstream": {
+    "url": "http://localhost:11434/api/generate",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  },
+  "memory": {
+    "baseUrl": "http://localhost:3000",
+    "apiKey": "demo-key",
+    "orgId": "demo-org",
+    "projectId": "demo-project",
+    "subjectId": "local-operator",
+    "recipe": "conversation-memory",
+    "limit": 5
+  }
+}

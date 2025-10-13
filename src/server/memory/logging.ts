@@ -27,13 +27,14 @@ export function logPolicyDecision(params: {
   tags?: string[];
   source?: CapsuleSource;
   acl: CapsuleAcl;
+  event?: string;
 }) {
   if (!POLICY_LOG_ENABLED) {
     return;
   }
 
   const payload = {
-    ...baseEvent('capsule.policy.decision', params.scope),
+    ...baseEvent(params.event ?? 'capsule.policy.decision', params.scope),
     storage: {
       store: params.storage.store,
       graphEnrich: params.storage.graphEnrich ?? false,
@@ -56,13 +57,14 @@ export function logRecipeUsage(params: {
   limit: number;
   candidateLimit: number;
   resultCount: number;
+  event?: string;
 }) {
   if (!RECIPE_LOG_ENABLED) {
     return;
   }
 
   const payload = {
-    ...baseEvent('capsule.recipe.usage', params.scope),
+    ...baseEvent(params.event ?? 'capsule.recipe.usage', params.scope),
     recipe: params.recipe.name,
     limit: params.limit,
     candidateLimit: params.candidateLimit,

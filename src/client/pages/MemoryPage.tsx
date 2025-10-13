@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callMethod } from 'modelence/client';
 
@@ -181,6 +182,14 @@ export default function MemoryPage(): JSX.Element {
             Store, retrieve, and manage long-term memories for your AI agents. Keep important details pinned and
             transparent.
           </p>
+          <div className="flex flex-wrap gap-3 pt-2">
+            <Link
+              to="/studio"
+              className="inline-flex items-center rounded-lg border border-indigo-400 px-3 py-1.5 text-sm font-semibold text-indigo-300 transition hover:bg-indigo-500/10"
+            >
+              Open Capsule Studio →
+            </Link>
+          </div>
         </header>
 
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-lg shadow-slate-900/40">

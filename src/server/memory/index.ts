@@ -17,8 +17,13 @@ import {
   resolveSource,
   resolveTypeValue
 } from './meta';
-import { defaultStoragePolicies, evaluateStoragePolicies, listStoragePolicySummaries } from './policies';
+import {
+  defaultStoragePolicies,
+  evaluateStoragePolicies,
+  listStoragePolicySummaries
+} from './policies';
 import { decryptPiiFlags, encryptPiiFlags } from './security';
+import type { SearchRecipe } from './recipes';
 import {
   applyRecipeWeight,
   describeRecipeMatch,
@@ -136,6 +141,41 @@ const recipeNameSchema = z.enum([
   'knowledge-qa',
   'audit-trace'
 ]);
+
+const recipeDefinitionSchema = z.object({
+  name: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().min(1),
+  limit: z.number().int().positive().max(50),
+  candidateLimit: z.number().int().positive().max(2000),
+  filters: z
+    .object({
+      pinnedOnly: z.boolean().optional(),
+      graphEnrich: z.boolean().optional(),
+      types: z.array(z.string().min(1)).optional()
+    })
+    .optional(),
+  scoring: z.object({
+    semanticWeight: z.number(),
+    importanceWeight: z.number().optional(),
+    recencyWeight: z.number().optional(),
+    pinnedBoost: z.number().optional()
+  })
+});
+
+const recipePreviewSchema = tenantArgSchema.extend({
+  query: z.string().min(1),
+  limit: z.number().int().positive().max(50).optional(),
+  recipe: recipeDefinitionSchema
+});
+
+const policyPreviewSchema = tenantArgSchema.extend({
+  type: z.string().min(1).nullish(),
+  tags: z.array(z.string().min(1)).optional(),
+  pinned: z.boolean().optional(),
+  source: sourceSchema.nullish(),
+  acl: aclSchema.nullish()
+});
 
 const metadataCreateFields = {
   type: z.string().min(1).nullish(),
@@ -398,6 +438,123 @@ function computeExpirationDate(createdAt: Date, ttlSeconds?: number | null): Dat
   return new Date(createdAt.getTime() + ttlSeconds * 1000);
 }
 
+function buildRecipeFromDefinition(definition: z.infer<typeof recipeDefinitionSchema>): SearchRecipe {
+  const coercedName = definition.name as unknown as SearchRecipe['name'];
+  return {
+    name: coercedName,
+    label: definition.label,
+    description: definition.description,
+    limit: definition.limit,
+    candidateLimit: definition.candidateLimit,
+    filters: definition.filters
+      ? {
+          ...(definition.filters.pinnedOnly !== undefined
+            ? { pinnedOnly: definition.filters.pinnedOnly }
+            : {}),
+          ...(definition.filters.graphEnrich !== undefined
+            ? { graphEnrich: definition.filters.graphEnrich }
+            : {}),
+          ...(definition.filters.types ? { types: definition.filters.types } : {})
+        }
+      : undefined,
+    scoring: {
+      semanticWeight: definition.scoring.semanticWeight,
+      ...(definition.scoring.importanceWeight !== undefined
+        ? { importanceWeight: definition.scoring.importanceWeight }
+        : {}),
+      ...(definition.scoring.recencyWeight !== undefined
+        ? { recencyWeight: definition.scoring.recencyWeight }
+        : {}),
+      ...(definition.scoring.pinnedBoost !== undefined
+        ? { pinnedBoost: definition.scoring.pinnedBoost }
+        : {})
+    }
+  };
+}
+
+async function executeRecipeSearch(
+  scope: TenantScope,
+  recipe: SearchRecipe,
+  queryString: string,
+  explicitLimit?: number,
+  logEvent: 'capsule.recipe.usage' | 'capsule.recipe.preview' = 'capsule.recipe.usage'
+) {
+  const limitValue = explicitLimit && explicitLimit > 0 ? explicitLimit : recipe.limit;
+  const candidateLimit = Math.max(recipe.candidateLimit, limitValue * 5);
+
+  const queryEmbeddingResult = await generateEmbedding(queryString, 'query');
+  const queryEmbedding = normalizeEmbedding(queryEmbeddingResult.embedding);
+
+  const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope) };
+  if (recipe.filters?.pinnedOnly) {
+    fetchFilter.pinned = true;
+  }
+  if (typeof recipe.filters?.graphEnrich === 'boolean') {
+    fetchFilter.graphEnrich = recipe.filters.graphEnrich;
+  }
+  if (recipe.filters?.types && recipe.filters.types.length > 0) {
+    fetchFilter.type = { $in: recipe.filters.types };
+  }
+
+  const candidates = await dbMemories.fetch(fetchFilter, {
+    sort: { createdAt: -1 },
+    limit: candidateLimit
+  });
+
+  const results = candidates
+    .map((doc) => {
+      const semanticScore = cosineSimilarity(
+        queryEmbedding.embedding,
+        queryEmbedding.norm,
+        doc.embedding,
+        doc.embeddingNorm
+      );
+      const weightedScore = applyRecipeWeight(
+        semanticScore,
+        {
+          pinned: doc.pinned,
+          importanceScore: doc.importanceScore,
+          recencyScore: doc.recencyScore,
+          storage: doc.storage
+        },
+        recipe.scoring
+      );
+      return {
+        doc,
+        semanticScore,
+        weightedScore
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.weightedScore))
+    .sort((a, b) => b.weightedScore - a.weightedScore)
+    .slice(0, limitValue)
+    .map(({ doc, weightedScore, semanticScore }) => ({
+      ...toClientMemory(doc),
+      score: semanticScore,
+      recipeScore: weightedScore
+    }));
+
+  const explanation =
+    `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
+    `item(s).`;
+
+  logRecipeUsage({
+    scope,
+    recipe,
+    limit: limitValue,
+    candidateLimit,
+    resultCount: results.length,
+    event: logEvent
+  });
+
+  return {
+    query: queryString,
+    results,
+    recipe: recipe.name,
+    explanation
+  };
+}
+
 async function applyRetentionPolicy(scope: TenantScope): Promise<RetentionResult> {
   const filter = memoryScopeFilter(scope);
   const total = await dbMemories.countDocuments(filter);
@@ -654,79 +811,68 @@ async function searchMemories(
   explanation: string;
 }> {
   const recipe = getSearchRecipe(options?.recipe);
-  const explicitLimit = options?.limit;
-  const limitValue = explicitLimit && explicitLimit > 0 ? explicitLimit : recipe.limit;
-  const candidateLimit = Math.max(recipe.candidateLimit, limitValue * 5);
+  return executeRecipeSearch(scope, recipe, queryString, options?.limit);
+}
 
-  const queryEmbeddingResult = await generateEmbedding(queryString, 'query');
-  const queryEmbedding = normalizeEmbedding(queryEmbeddingResult.embedding);
+async function previewRecipeSearch(
+  scope: TenantScope,
+  recipeDefinition: z.infer<typeof recipeDefinitionSchema>,
+  queryString: string,
+  limit?: number
+) {
+  const recipe = buildRecipeFromDefinition(recipeDefinition);
+  return executeRecipeSearch(scope, recipe, queryString, limit, 'capsule.recipe.preview');
+}
 
-  const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope) };
-  if (recipe.filters?.pinnedOnly) {
-    fetchFilter.pinned = true;
+function previewStoragePolicies(
+  scope: TenantScope,
+  context: {
+    type?: string | null;
+    tags?: string[];
+    pinned?: boolean;
+    source?: CapsuleSource | null;
+    acl?: CapsuleAcl | null;
   }
-  if (typeof recipe.filters?.graphEnrich === 'boolean') {
-    fetchFilter.graphEnrich = recipe.filters.graphEnrich;
-  }
-  if (recipe.filters?.types && recipe.filters.types.length > 0) {
-    fetchFilter.type = { $in: recipe.filters.types };
-  }
+) {
+  const acl = resolveAcl(context.acl ?? null);
+  const evaluation = evaluateStoragePolicies(
+    {
+      type: context.type ?? undefined,
+      tags: context.tags,
+      pinned: context.pinned ?? false,
+      source: context.source ?? undefined
+    },
+    defaultStoragePolicies
+  );
 
-  const candidates = await dbMemories.fetch(fetchFilter, {
-    sort: { createdAt: -1 },
-    limit: candidateLimit
-  });
+  const storageState: CapsuleStorageState = {
+    store: evaluation.store ?? 'long_term',
+    policies: evaluation.appliedPolicies,
+    graphEnrich: evaluation.graphEnrich ?? false,
+    ...(typeof evaluation.dedupeThreshold === 'number'
+      ? { dedupeThreshold: evaluation.dedupeThreshold }
+      : {})
+  };
 
-  const results = candidates
-    .map((doc) => {
-      const semanticScore = cosineSimilarity(
-        queryEmbedding.embedding,
-        queryEmbedding.norm,
-        doc.embedding,
-        doc.embeddingNorm
-      );
-      const weightedScore = applyRecipeWeight(
-        semanticScore,
-        {
-          pinned: doc.pinned,
-          importanceScore: doc.importanceScore,
-          recencyScore: doc.recencyScore,
-          storage: doc.storage
-        },
-        recipe.scoring
-      );
-      return {
-        doc,
-        semanticScore,
-        weightedScore
-      };
-    })
-    .filter((entry) => Number.isFinite(entry.weightedScore))
-    .sort((a, b) => b.weightedScore - a.weightedScore)
-    .slice(0, limitValue)
-    .map(({ doc, weightedScore, semanticScore }) => ({
-      ...toClientMemory(doc),
-      score: semanticScore,
-      recipeScore: weightedScore
-    }));
-
-  const explanation =
-    `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
-    `item(s).`;
-
-  logRecipeUsage({
+  logPolicyDecision({
     scope,
-    recipe,
-    limit: limitValue,
-    candidateLimit,
-    resultCount: results.length
+    storage: storageState,
+    policies: evaluation.appliedPolicies,
+    pinned: context.pinned ?? false,
+    type: context.type ?? undefined,
+    tags: context.tags ?? [],
+    source: context.source ?? undefined,
+    acl,
+    event: 'capsule.policy.preview'
   });
 
   return {
-    query: queryString,
-    results,
-    recipe: recipe.name,
-    explanation
+    store: storageState.store,
+    graphEnrich: storageState.graphEnrich ?? false,
+    dedupeThreshold: storageState.dedupeThreshold ?? null,
+    appliedPolicies: evaluation.appliedPolicies,
+    ttlSeconds: evaluation.ttlSeconds ?? null,
+    importanceScore: evaluation.importanceScore ?? null
   };
 }
 
@@ -1176,9 +1322,50 @@ const apiRoutes: RouteDefinition[] = [
     }
   },
   {
+    path: '/v1/memories/recipes/preview',
+    handlers: {
+      post: withAuth(async (params, scope) => {
+        const body = typeof params.body === 'object' && params.body ? params.body : {};
+        const parsed = recipePreviewSchema.parse({
+          ...body,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const result = await previewRecipeSearch(tenant, parsed.recipe, parsed.query, parsed.limit);
+        return buildResponse(result);
+      })
+    }
+  },
+  {
     path: '/v1/memories/policies',
     handlers: {
       get: withAuth(async () => buildResponse({ policies: listStoragePolicySummaries() }))
+    }
+  },
+  {
+    path: '/v1/memories/policies/preview',
+    handlers: {
+      post: withAuth(async (params, scope) => {
+        const body = typeof params.body === 'object' && params.body ? params.body : {};
+        const parsed = policyPreviewSchema.parse({
+          ...body,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const context = {
+          type: parsed.type ?? undefined,
+          tags: parsed.tags,
+          pinned: parsed.pinned,
+          source: parsed.source ?? undefined,
+          acl: parsed.acl ?? undefined
+        };
+        const result = previewStoragePolicies(tenant, context);
+        return buildResponse(result);
+      })
     }
   },
   {
@@ -1280,6 +1467,22 @@ export default new Module('memory', {
       return {
         policies: listStoragePolicySummaries()
       };
+    },
+    previewRecipe(args) {
+      const parsed = recipePreviewSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      return previewRecipeSearch(tenant, parsed.recipe, parsed.query, parsed.limit);
+    },
+    previewStoragePolicies(args) {
+      const parsed = policyPreviewSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      return previewStoragePolicies(tenant, {
+        type: parsed.type ?? undefined,
+        tags: parsed.tags,
+        pinned: parsed.pinned,
+        source: parsed.source ?? undefined,
+        acl: parsed.acl ?? undefined
+      });
     }
   },
   mutations: {

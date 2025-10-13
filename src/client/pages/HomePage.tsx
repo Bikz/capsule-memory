@@ -36,6 +36,12 @@ export default function HomePage() {
           >
             Open Capsule Memory
           </Link>
+          <Link
+            to="/studio"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-900 px-4 py-2 text-lg font-semibold text-slate-900 transition hover:bg-slate-900 hover:text-white"
+          >
+            Launch Capsule Studio
+          </Link>
         </div>
       </div>
     </div>

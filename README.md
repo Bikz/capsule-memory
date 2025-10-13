@@ -99,6 +99,9 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run mcp`  | Start the Capsule Memory MCP bridge.|
 | `npm run backfill` | Run the metadata backfill for existing memories. |
 | `npm run policies` | Print the current storage policy catalogue. |
+| `npm run router` | Launch the Capsule Router proxy for quick-start integrations. |
+| `npm run bench` | Execute the Capsule Bench CLI (see docs below). |
+| `npm run mcp:manifest` | Scaffold a ready-to-use MCP manifest that points at the Capsule bridge. |
 
 ### Backfill existing memories
 
@@ -126,6 +129,41 @@ The script respects `MONGO_DB` if you need to target a specific database within 
 - **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
   events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
 - **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
+
+### Capsule Router quick-start
+
+1. Generate a starter config (or copy `capsule-router.config.example.json`):
+   ```bash
+   npm run router -- --init
+   ```
+2. Update the file with your Capsule tenant identifiers, API key, recipe, and upstream endpoint.
+3. Launch the proxy:
+   ```bash
+   npm run router -- --config capsule-router.config.json
+   ```
+
+POST requests send `{ prompt: "..." }` (plus any extra fields). The router enriches the payload with
+`capsule.results` (top memories + metadata) before forwarding to your upstream URL.
+
+### MCP quick-start
+
+Generate a manifest that most MCP hosts (including Claude Desktop) can import:
+
+```bash
+npm run mcp:manifest  # creates capsule-memory.mcp.json
+```
+
+Adjust the embedded environment variables if your Capsule server runs elsewhere. Point your MCP client at the manifest and it will execute `npx @capsule-memory/mcp` with the configured env.
+
+### Capsule Bench (shadow benchmarking)
+
+- Create a dataset describing the prompts you want to evaluate (see `capsule-bench.dataset.example.json`).
+- Run the CLI:
+  ```bash
+  npm run bench -- --dataset my-dataset.json --recipe conversation-memory --shadow-url http://localhost:8080/search
+  ```
+
+The CLI prints latency statistics, optional accuracy hits (if you supply `expected` strings), and per-sample summaries. Use `--output results.json` to persist structured results.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
