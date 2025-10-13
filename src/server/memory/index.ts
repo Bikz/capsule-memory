@@ -44,6 +44,7 @@ type TenantScope = {
   orgId: string;
   projectId: string;
   subjectId: string;
+  byokKey?: string;
 };
 
 type RetentionResult = {
@@ -127,7 +128,8 @@ const sourceSchema = z
   });
 
 const aclSchema = z.object({
-  visibility: visibilitySchema
+  visibility: visibilitySchema,
+  subjects: z.array(z.string().min(1)).optional()
 });
 
 const storageDestinationSchema = z.enum(['short_term', 'long_term', 'capsule_graph']);
@@ -328,10 +330,16 @@ function ensureTenant(
   return { orgId, projectId, subjectId };
 }
 
-function memoryScopeFilter(scope: TenantScope) {
-  return {
+function memoryScopeFilter(scope: TenantScope, options?: { includeSubject?: boolean }) {
+  const base = {
     orgId: scope.orgId,
-    projectId: scope.projectId,
+    projectId: scope.projectId
+  } as const;
+  if (options?.includeSubject === false) {
+    return base;
+  }
+  return {
+    ...base,
     subjectId: scope.subjectId
   } as const;
 }
@@ -384,7 +392,7 @@ function cosineSimilarity(
   return dot / denom;
 }
 
-function toClientMemory(doc: MemoryDocument) {
+function toClientMemory(doc: MemoryDocument, options?: { byokKey?: string }) {
   const { embedding, embeddingNorm, _id, piiFlagsCipher, ...rest } = doc as MemoryDocument & {
     embeddingModel?: string;
     provenance?: unknown;
@@ -402,7 +410,7 @@ function toClientMemory(doc: MemoryDocument) {
     typeof rest.recencyScore === 'number'
       ? rest.recencyScore
       : computeRecencyScore();
-  const aclValue = rest.acl ?? resolveAcl(null);
+  const aclValue = resolveAcl(rest.acl ?? null, doc.subjectId);
   const langValue =
     typeof rest.lang === 'string' && rest.lang
       ? rest.lang
@@ -426,7 +434,7 @@ function toClientMemory(doc: MemoryDocument) {
   const piiFlagsValue =
     rest.piiFlags && typeof rest.piiFlags === 'object'
       ? (rest.piiFlags as CapsulePiiFlags)
-      : decryptPiiFlags(piiFlagsCipher);
+      : decryptPiiFlags(piiFlagsCipher, options?.byokKey);
   return {
     id: _id.toString(),
     ...rest,
@@ -465,14 +473,31 @@ function hasSensitivePii(piiFlags?: CapsulePiiFlags | null): boolean {
   return Object.values(piiFlags).some((value) => value === true);
 }
 
-function resolveStoredPiiFlags(doc?: MemoryDocument | null): CapsulePiiFlags | undefined {
+function resolveStoredPiiFlags(doc?: MemoryDocument | null, byokKey?: string): CapsulePiiFlags | undefined {
   if (!doc) {
     return undefined;
   }
   if (doc.piiFlags && typeof doc.piiFlags === 'object') {
     return doc.piiFlags as CapsulePiiFlags;
   }
-  return decryptPiiFlags((doc as { piiFlagsCipher?: string }).piiFlagsCipher);
+  return decryptPiiFlags((doc as { piiFlagsCipher?: string }).piiFlagsCipher, byokKey);
+}
+
+function isAccessibleMemory(doc: MemoryDocument, scope: TenantScope): boolean {
+  if (doc.subjectId === scope.subjectId) {
+    return true;
+  }
+  const acl = doc.acl ?? { visibility: 'private' };
+  if (acl.visibility === 'public') {
+    return true;
+  }
+  if (acl.visibility === 'shared') {
+    if (Array.isArray(acl.subjects) && acl.subjects.length > 0) {
+      return acl.subjects.includes(scope.subjectId);
+    }
+    return true;
+  }
+  return false;
 }
 
 function sanitizeLanguageOverride(lang?: string | null): string | undefined {
@@ -551,7 +576,7 @@ async function executeRecipeSearch(
   const queryEmbeddingResult = await generateEmbedding(rewrittenQuery, 'query');
   const queryEmbedding = normalizeEmbedding(queryEmbeddingResult.embedding);
 
-  const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope) };
+  const fetchFilter: Record<string, unknown> = { ...memoryScopeFilter(scope, { includeSubject: false }) };
   if (recipe.filters?.pinnedOnly) {
     fetchFilter.pinned = true;
   }
@@ -586,16 +611,18 @@ async function executeRecipeSearch(
     candidates = await fetchCandidates(fetchFilter, candidateLimit);
   }
 
+  const accessibleCandidates = candidates.filter((doc) => isAccessibleMemory(doc, scope));
+
   const vectorLatency = performance.now() - vectorStart;
   logVectorMetrics({
     scope,
     backend: VECTOR_BACKEND,
     latencyMs: Math.round(vectorLatency),
     cacheHit,
-    candidateCount: candidates.length
+    candidateCount: accessibleCandidates.length
   });
 
-  let results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean }> = candidates
+  let results: Array<ReturnType<typeof toClientMemory> & { score: number; recipeScore: number; graphHit?: boolean }> = accessibleCandidates
     .map((doc) => {
       const semanticScore = cosineSimilarity(
         queryEmbedding.embedding,
@@ -622,12 +649,12 @@ async function executeRecipeSearch(
     .filter((entry) => Number.isFinite(entry.weightedScore))
     .sort((a, b) => b.weightedScore - a.weightedScore)
     .slice(0, limitValue)
-    .map(({ doc, weightedScore, semanticScore }) => ({
-      ...toClientMemory(doc),
-      score: semanticScore,
-      recipeScore: weightedScore,
-      graphHit: false
-    }));
+      .map(({ doc, weightedScore, semanticScore }) => ({
+        ...toClientMemory(doc, { byokKey: scope.byokKey }),
+        score: semanticScore,
+        recipeScore: weightedScore,
+        graphHit: false
+      }));
 
   const seenIds = new Set(results.map((item) => item.id));
 
@@ -640,12 +667,14 @@ async function executeRecipeSearch(
       limit: recipe.graphExpand.limit
     });
     if (expansions.length > 0) {
-      const expansionItems = expansions.map((doc) => ({
-        ...toClientMemory(doc),
-        score: 0,
-        recipeScore: 0,
-        graphHit: true
-      }));
+      const expansionItems = expansions
+        .filter((doc) => isAccessibleMemory(doc, scope))
+        .map((doc) => ({
+          ...toClientMemory(doc, { byokKey: scope.byokKey }),
+          score: 0,
+          recipeScore: 0,
+          graphHit: true
+        }));
       results = [...results, ...expansionItems];
       for (const expansion of expansionItems) {
         seenIds.add(expansion.id);
@@ -673,9 +702,10 @@ async function executeRecipeSearch(
       .slice(0, limitValue);
   }
 
+  const rewriteNote = rewrittenQuery !== queryString ? ' (rewritten)' : '';
+  const rerankNote = process.env.CAPSULE_RERANKER_URL ? ' (reranked)' : '';
   const explanation =
-    `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} ` +
-    `item(s).${rewrittenQuery !== queryString ? ' (query rewritten)' : ''}`;
+    `Recipe "${recipe.label}" (${describeRecipeMatch(recipe.filters)}) returned ${results.length} item(s)${rewriteNote}${rerankNote}.`;
 
   logRecipeUsage({
     scope,
@@ -752,7 +782,7 @@ async function createMemory(
   const langValue = resolveLanguage(content, input.lang ?? null);
   const typeValue = resolveTypeValue(input.type ?? null);
   const sourceValue = resolveSource(input.source ?? undefined);
-  const aclValue = resolveAcl(input.acl ?? null);
+  const aclValue = resolveAcl(input.acl ?? null, scope.subjectId);
   const piiFlagsValue = resolvePiiFlags(input.piiFlags ?? undefined);
 
   if (hasSensitivePii(piiFlagsValue) && aclValue.visibility === 'public') {
@@ -813,7 +843,7 @@ async function createMemory(
     })
   ];
 
-  const piiEncryption = encryptPiiFlags(piiFlagsValue);
+  const piiEncryption = encryptPiiFlags(piiFlagsValue, scope.byokKey);
 
   const storageState: CapsuleStorageState = {
     store: finalStore,
@@ -834,7 +864,9 @@ async function createMemory(
   });
 
   const doc = {
-    ...filter,
+    orgId: scope.orgId,
+    projectId: scope.projectId,
+    subjectId: scope.subjectId,
     content,
     lang: langValue,
     embedding,
@@ -869,16 +901,18 @@ async function createMemory(
 
   if (graphEnrichValue) {
     await scheduleGraphJob({
-      orgId: filter.orgId,
-      projectId: filter.projectId,
-      subjectId: filter.subjectId,
+      orgId: scope.orgId,
+      projectId: scope.projectId,
+      subjectId: scope.subjectId,
       memoryId: insertedId.toString()
     });
   }
 
   return {
     id: insertedId.toString(),
-    ...filter,
+    orgId: scope.orgId,
+    projectId: scope.projectId,
+    subjectId: scope.subjectId,
     content,
     lang: langValue,
     createdAt,
@@ -911,7 +945,7 @@ async function listMemories(
   filters: MemoryListFilters
 ): Promise<{ items: ReturnType<typeof toClientMemory>[]; explanation: string }> {
   const { limit, pinned, tag, type, visibility, store, graphEnrich } = filters;
-  const query: Record<string, unknown> = { ...memoryScopeFilter(scope) };
+  const query: Record<string, unknown> = { ...memoryScopeFilter(scope, { includeSubject: false }) };
 
   if (typeof pinned === 'boolean') {
     query.pinned = pinned;
@@ -942,9 +976,11 @@ async function listMemories(
     limit: limit ?? 50
   });
 
+  const accessible = memories.filter((doc) => isAccessibleMemory(doc, scope));
+
   return {
-    items: memories.map(toClientMemory),
-    explanation: `Loaded ${memories.length} most recent memories.`
+    items: accessible.map((doc) => toClientMemory(doc, { byokKey: scope.byokKey })),
+    explanation: `Loaded ${accessible.length} accessible memories.`
   };
 }
 
@@ -987,7 +1023,7 @@ function previewStoragePolicies(
     acl?: CapsuleAcl | null;
   }
 ) {
-  const acl = resolveAcl(context.acl ?? null);
+  const acl = resolveAcl(context.acl ?? null, scope.subjectId);
   const evaluation = evaluateStoragePolicies(
     {
       type: context.type ?? undefined,
@@ -1167,11 +1203,11 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
 
   if (acl !== undefined) {
     mutated = true;
-    const resolvedAcl = resolveAcl(acl ?? null);
+    const resolvedAcl = resolveAcl(acl ?? null, existingDoc?.subjectId ?? scope.subjectId);
     if (
       resolvedAcl.visibility === 'public' &&
       piiFlags === undefined &&
-      hasSensitivePii(resolveStoredPiiFlags(existingDoc))
+      hasSensitivePii(resolveStoredPiiFlags(existingDoc, scope.byokKey))
     ) {
       throw new Error('Cannot set visibility to public while PII flags remain. Clear PII or choose a private scope.');
     }
@@ -1186,13 +1222,13 @@ async function updateMemory(scope: TenantScope, input: UpdateMemoryInput & { id:
       (response.acl as CapsuleAcl | undefined) ??
       (update.acl as CapsuleAcl | undefined) ??
       existingDoc?.acl ??
-      resolveAcl(null);
+      resolveAcl(null, scope.subjectId);
     if (hasSensitivePii(resolvedFlags) && effectiveAcl.visibility === 'public') {
       throw new Error('Cannot store PII when ACL visibility is public. Choose a private or shared scope.');
     }
 
     if (resolvedFlags && Object.keys(resolvedFlags).length > 0) {
-      const piiEncryption = encryptPiiFlags(resolvedFlags);
+      const piiEncryption = encryptPiiFlags(resolvedFlags, scope.byokKey);
       if (piiEncryption.cipher) {
         update.piiFlagsCipher = piiEncryption.cipher;
         unset.piiFlags = '';
@@ -1385,7 +1421,9 @@ function withAuth(handler: AuthedRouteHandler) {
     // When no API keys are configured we allow anonymous access for development scenarios.
 
     try {
-      const scope = parseTenantFromHeaders(normalizedHeaders);
+      const scopeBase = parseTenantFromHeaders(normalizedHeaders);
+      const byokHeader = normalizedHeaders['x-capsule-byok'];
+      const scope = byokHeader ? { ...scopeBase, byokKey: byokHeader } : scopeBase;
       try {
         return await handler(params, scope, normalizedHeaders);
       } catch (error) {

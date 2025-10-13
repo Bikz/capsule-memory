@@ -19,7 +19,10 @@
     "router": "node tools/capsule-router.mjs",
     "bench": "node tools/capsule-bench.mjs",
     "ingest": "node tools/capsule-ingest.mjs",
-    "local": "node tools/capsule-local.mjs"
+    "local": "node tools/capsule-local.mjs",
+    "local:sync": "node tools/capsule-local-sync.mjs",
+    "eval:retrieval": "tsx src/tools/evaluateRetrieval.ts",
+    "local:manifest": "node tools/capsule-local-manifest.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",

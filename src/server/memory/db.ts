@@ -44,7 +44,8 @@ export const dbMemories = new Store('memories', {
       .optional(),
     acl: schema
       .object({
-        visibility: schema.enum(['private', 'shared', 'public'])
+        visibility: schema.enum(['private', 'shared', 'public']),
+        subjects: schema.array(schema.string()).optional()
       })
       .optional(),
     piiFlags: schema.object({}).catchall(schema.boolean()).optional(),

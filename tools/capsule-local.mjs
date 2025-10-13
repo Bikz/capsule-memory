@@ -10,6 +10,8 @@ import sqlite3 from 'sqlite3';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB_PATH = path.resolve(process.cwd(), 'capsule-local.db');
 const DEFAULT_PORT = Number.parseInt(process.env.CAPSULE_LOCAL_PORT ?? '5151', 10);
+const DEFAULT_CONFIG_PATH = process.env.CAPSULE_LOCAL_CONFIG ||
+  path.resolve(process.cwd(), 'capsule-local.config.json');
 
 sqlite3.verbose();
 
@@ -31,6 +33,32 @@ function initDatabase(dbPath) {
     `);
   });
   return db;
+}
+
+async function loadConfig(configPath) {
+  try {
+    const raw = await fsPromises.readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      serviceName: parsed.serviceName || 'Capsule Local',
+      description:
+        parsed.description ||
+        'Local-first Capsule Memory cache for offline use and MCP integrations.',
+      defaultSubjectId: parsed.defaultSubjectId || 'local-operator',
+      defaultTags: Array.isArray(parsed.defaultTags)
+        ? parsed.defaultTags.filter((value) => typeof value === 'string' && value.trim().length > 0)
+        : [],
+      manifest: parsed.manifest || {}
+    };
+  } catch (error) {
+    return {
+      serviceName: 'Capsule Local',
+      description: 'Local-first Capsule Memory cache for offline use and MCP integrations.',
+      defaultSubjectId: 'local-operator',
+      defaultTags: [],
+      manifest: {}
+    };
+  }
 }
 
 function listMemories(db, limit = 20) {
@@ -81,7 +109,7 @@ function makeResponse(res, status, data) {
   res.end(body);
 }
 
-function startLocalServer(db, port) {
+function startLocalServer(db, port, config) {
   const server = http.createServer(async (req, res) => {
     const parsed = url.parse(req.url || '', true);
     if (req.method === 'GET' && parsed.pathname === '/local/memories') {
@@ -106,7 +134,17 @@ function startLocalServer(db, port) {
             makeResponse(res, 400, { error: 'id and content are required' });
             return;
           }
-          await insertMemory(db, payload);
+          const enriched = {
+            ...payload,
+            metadata: {
+              ...(payload.metadata || {}),
+              service: 'capsule-local'
+            },
+            tags: Array.isArray(payload.tags)
+              ? Array.from(new Set([...config.defaultTags, ...payload.tags]))
+              : config.defaultTags
+          };
+          await insertMemory(db, enriched);
           makeResponse(res, 201, { ok: true });
         } catch (error) {
           makeResponse(res, 500, { error: String(error) });
@@ -120,11 +158,23 @@ function startLocalServer(db, port) {
       return;
     }
 
+    if (req.method === 'GET' && parsed.pathname === '/local/manifest') {
+      makeResponse(res, 200, {
+        data: {
+          name: config.serviceName,
+          description: config.description,
+          endpoint: `http://localhost:${port}/local/memories`,
+          ...config.manifest
+        }
+      });
+      return;
+    }
+
     makeResponse(res, 404, { error: 'Not found' });
   });
 
   server.listen(port, () => {
-    console.log(`Capsule Local listening on http://localhost:${port}`);
+    console.log(`${config.serviceName} listening on http://localhost:${port}`);
   });
 }
 
@@ -142,9 +192,10 @@ Environment:
 
   const dbPath = process.env.CAPSULE_LOCAL_DB || DEFAULT_DB_PATH;
   const port = DEFAULT_PORT;
+  const config = await loadConfig(DEFAULT_CONFIG_PATH);
 
   const db = initDatabase(dbPath);
-  startLocalServer(db, port);
+  startLocalServer(db, port, config);
 }
 
 main().catch((error) => {

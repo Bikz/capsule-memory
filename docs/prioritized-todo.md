@@ -1,39 +1,30 @@
 # Capsule Memory Prioritized TODO
 
-## ✅ Completed (Wave 1 foundations delivered)
-- [x] CapsuleMeta v0.1 schema with ACL enforcement, PII encryption, provenance, and SDK exposure.
-- [x] Programmable storage v1: policy engine, graph-enrich routing, backfill tooling, and policy inspector CLI.
-- [x] Search recipe runtime: starter library, recipe-weighted scoring, `/v1/memories/recipes` API, and SDK support.
-- [x] Observability & safeguards: structured policy/recipe logs, hardening of API guards, and migration/backfill scripts.
+_Last refreshed: 2024-05-07_
 
-## 🚀 Sprint 1 (Wave 1 parity still outstanding)
-1. [x] **Capsule Router & MCP polish** (roadmap item 5)
-   - Router CLI proxy with templated config + MCP manifest generator for <5 min TTFV.
-2. [x] **Studio UX for policies & recipes** (roadmap item 7)
-   - Live recipe/policy editors with previews and provenance surfacing in Capsule Studio.
-3. [x] **Capsule Bench (eval harness)** (roadmap item 10)
-   - CLI + dataset scaffolding for latency/quality benchmarking and shadow-mode logging.
+## ✅ Wave 1 Foundations
+- [x] CapsuleMeta v0.1 schema with ACL/PII safeguards and SDK updates.
+- [x] Programmable storage v1 (policies, graph enrich routing, backfill tooling).
+- [x] Search recipe runtime + Capsule Studio editors.
+- [x] Operational tooling: Router/MCP quick-start, Capsule Bench, logging & backfill.
 
-## 🧭 Sprint 2 (Wave 1 completion & Wave 2 kickoff)
-1. [x] **Connectors: Notion & Google Drive** (roadmap item 6)
-   - Ingestion job tracking module, CLI (`npm run ingest`) for exports, tagging, and Studio monitor view.
-2. [x] **Capsule-Graph read-only enrichment** (roadmap item 4)
-   - Async entity extraction queue, graph entity store, and recipe-level `graphExpand` support.
-3. [x] **Latency & scalability groundwork** (roadmap item 9)
-   - Vector backend configuration switches, hotset caching, and vector metric logging for future pgvector/Qdrant adapters.
+## 🚀 Wave 2 – Active Focus
+1. **Adaptive Retrieval Iteration**
+   - Integrate production query rewriting + reranker services with eval coverage.
+   - Expose knobs for per-recipe caching and guardrails (latency budgets, fallbacks).
+   - Update Capsule Bench datasets to measure rewrite/rerank impact.
+2. **Local-First Workflow**
+   - Package Capsule Local (desktop app or binary) with sync/backfill support.
+   - Expose MCP sharing & multi-client coordination (offline-first experience).
+   - Harden local cache encryption/storage and document ops flows.
+3. **Security & Governance Enhancements**
+   - Finalise BYOK rollout (metadata + embeddings), admin tooling for key rotation.
+   - Row-level ACL management (shared groups, auditing, guardrails in Studio).
+   - Write-time PII gating policies with reporting and connector compliance checks.
 
-## 🧭 Sprint 3 (Wave 2 launchpad)
-- [x] **Latency & vector groundwork** – VECTOR_BACKEND toggles (`mongo|pgvector|qdrant`), hotset cache, and vector metrics logging.
-- [x] **Adaptive retrieval scaffolding** – recipe previews accept custom blends and cache policy, paving way for rerankers.
-- [x] **Capsule Local prototype** – SQLite-backed offline service with CLI (`npm run local`) and MCP/router compatibility.
+## 🌉 Wave 3 Preview
+- Programmable storage v2 (lifecycles, summarisation DAGs, proof-of-recall).
+- Capsule Federation (multi-region brokers, BYO embeddings).
+- Connectors as a platform (GA catalog, OSS SDK) and vertical solutions (IDE copilots, support agents, GTM tooling).
 
-## 🌉 Near-Term Wave 2 (post-parity acceleration)
-- **Adaptive retrieval** – plug in query rewriting + learned rerankers with caches (roadmap item 8).
-- **OpenMemory-class local-first** – Capsule Local desktop app + MCP sharing roll-out (item 11).
-- **Security & governance** – BYOK rollout, row-level ACLs, write-time PII policy gating (item 12).
-
-## 🛣️ Long-Range (Wave 3 / Moat)
-- **Programmable storage v2** – lifecycle DAGs, summarisation, proof-of-recall (item 13).
-- **Capsule federation** – multi-region brokering & BYO embeddings (item 14).
-- **Connectors as a platform** – GA catalog + OSS connector SDK (item 15).
-- **Vertical solutions & community GTM** – sample apps, migration tooling, pricing (items 16–17).
+Keep this list aligned with `docs/status.md` and sprint outcomes.

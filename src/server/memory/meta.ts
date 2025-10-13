@@ -4,6 +4,7 @@ export type StorageDestination = 'short_term' | 'long_term' | 'capsule_graph';
 
 export type CapsuleAcl = {
   visibility: CapsuleVisibility;
+  subjects?: string[];
 };
 
 export type CapsuleSource = {
@@ -91,11 +92,40 @@ export function resolveSource(source?: CapsuleSource | null): CapsuleSource | un
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-export function resolveAcl(acl?: CapsuleAcl | null): CapsuleAcl {
-  if (acl?.visibility) {
-    return { visibility: acl.visibility };
+function sanitizeSubjects(subjects?: string[] | null, ownerSubjectId?: string): string[] | undefined {
+  if (!Array.isArray(subjects)) {
+    return ownerSubjectId ? [ownerSubjectId] : undefined;
   }
-  return { visibility: 'private' };
+  const cleaned = Array.from(
+    new Set(subjects.map((subject) => subject?.trim()).filter((value): value is string => Boolean(value)))
+  );
+  if (cleaned.length === 0) {
+    return ownerSubjectId ? [ownerSubjectId] : undefined;
+  }
+  return cleaned;
+}
+
+export function resolveAcl(acl?: CapsuleAcl | null, ownerSubjectId?: string): CapsuleAcl {
+  const visibility: CapsuleVisibility = acl?.visibility ?? 'private';
+
+  if (visibility === 'private') {
+    return {
+      visibility,
+      subjects: sanitizeSubjects(acl?.subjects, ownerSubjectId)
+    };
+  }
+
+  if (visibility === 'shared') {
+    const subjects = Array.isArray(acl?.subjects)
+      ? Array.from(new Set(acl.subjects.filter((value) => typeof value === 'string' && value.trim().length > 0)))
+      : undefined;
+    return {
+      visibility,
+      subjects: subjects && subjects.length > 0 ? subjects : undefined
+    };
+  }
+
+  return { visibility: 'public' };
 }
 
 export function resolvePiiFlags(piiFlags?: CapsulePiiFlags | null): CapsulePiiFlags | undefined {

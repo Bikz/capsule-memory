@@ -4,16 +4,17 @@ Capsule Memory is an AI-ready long-term memory service built with [Modelence](ht
 React UI that any agent can use to persist knowledge, retrieve relevant memories by semantic similarity, pin critical facts, and
 apply basic retention policies that keep the store tidy without losing important information.
 
-## Feature Highlights
-- **Memory persistence** – store text memories together with Voyage AI embeddings, timestamps, and pin flags.
-- **Semantic search** – embed incoming queries and rank memories by cosine similarity so that lookups work by meaning rather than
-  exact keywords.
-- **Pin & forget controls** – toggle pinned status to protect critical facts and explicitly delete obsolete memories.
-- **Retention policy** – enforce a rolling limit (default `100` memories) that automatically removes the oldest unpinned item and
-  reports the action back to the caller.
-- **Transparent explanations** – every mutation returns a human-readable explanation so agent orchestrators can reason about what
-  happened.
-- **Rich UI** – a `/memory` management page lets you add, search, pin, and delete memories while seeing live policy feedback.
+- **Adaptive retrieval** – semantic search with optional query rewriting, learned rerankers, and Capsule-Graph expansions for
+  richer multi-hop answers.
+- **Programmable storage** – route memories via policies to short-term/long-term/graph stores, set TTLs, dedupe thresholds, and
+  capture provenance with full ACL enforcement.
+- **Connectors & ingest** – schedule ingestions (Notion, Google Drive) with `npm run ingest`, monitor jobs in Capsule Studio, and
+  bring third-party knowledge online in minutes.
+- **Capsule Local** – run the SQLite-backed local cache (`npm run local`) for offline development and MCP-first experiences.
+- **Tooling for operators** – Capsule Studio offers live recipe/policy editors, connector dashboards, and search/policy preview
+  tooling; Capsule Bench benchmarks adaptive retrieval against competitors.
+- **Router & MCP quick-start** – `npm run router` proxies memory-enriched prompts to any LLM endpoint; `npm run mcp` exposes the
+  API to MCP-compatible agents.
 
 ## Tech Stack
 - **Framework:** TypeScript + Modelence (Express + MongoDB server, React/Vite client)
@@ -89,6 +90,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 - **REST API** – Authenticated `/v1` routes expect `X-Capsule-Key`, `X-Capsule-Org`, `X-Capsule-Project`, and `X-Capsule-Subject` headers for multi-tenant scoping.
 - **Node SDK** – `@capsule-memory/node` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
 - **MCP CLI** – `@capsule-memory/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
+- **Connectors** – configure connector catalog entries in `config/connectors.json`; both the ingest CLI and server reuse the same metadata.
 
 ## Useful Commands
 | Command        | Description                         |
@@ -100,10 +102,13 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run backfill` | Run the metadata backfill for existing memories. |
 | `npm run policies` | Print the current storage policy catalogue. |
 | `npm run router` | Launch the Capsule Router proxy for quick-start integrations. |
-| `npm run bench` | Execute the Capsule Bench CLI (see docs below). |
+| `npm run bench` | Execute the Capsule Bench CLI (latency/quality benchmarking). |
 | `npm run mcp:manifest` | Scaffold a ready-to-use MCP manifest that points at the Capsule bridge. |
-| `npm run ingest` | Run the connector ingest helper for Notion/Drive exports. |
-| `npm run local` | Start the Capsule Local SQLite cache service. |
+| `npm run ingest` | Run the connector ingest helper for Notion/Drive exports (uses `config/connectors.json`). |
+| `npm run local` | Start the Capsule Local SQLite cache service for offline use. |
+| `npm run local:sync` | Sync memories between cloud Capsule and Capsule Local (pull/push). |
+| `npm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
+| `npm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
 
 ### Backfill existing memories
 
@@ -128,6 +133,7 @@ The script respects `MONGO_DB` if you need to target a specific database within 
   access.
 - **Metadata encryption**: set `CAPSULE_META_ENCRYPTION_KEY` (32-byte key, UTF-8 or base64) to encrypt `piiFlags` at rest. The key
   is required to read or mutate encrypted flags—store it securely (e.g., in your KMS).
+- **Bring-your-own key**: supply an `X-Capsule-BYOK` header per request to encrypt/decrypt metadata with customer-managed keys.
 - **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
   events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
 - **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
@@ -180,6 +186,7 @@ npm run ingest -- --connector google-drive --source ./drive-notes --dataset "dri
 ```
 
 Each run registers a job in `/v1/connectors` which you can monitor in Capsule Studio. Provide API credentials or local exports as needed; the CLI tags memories with the connector id so recipes/policies can target them immediately.
+- The connector catalog lives in `config/connectors.json` and drives both the API metadata and the ingest CLI help output.
 
 ### Capsule Local (offline cache)
 
@@ -189,11 +196,47 @@ Bring Capsule Memory offline via a lightweight SQLite service:
 CAPSULE_LOCAL_DB=./capsule-local.db CAPSULE_LOCAL_PORT=5151 npm run local
 ```
 
-The service exposes `/local/memories` for reads and `/local/status` for health checks. Point the MCP bridge or router at this port when operating fully offline, then sync via connectors once back online.
+The service exposes `/local/memories` for reads and `/local/status` for health checks. Point the MCP bridge or router at this port when operating fully offline, then sync via connectors or the sync CLI once back online.
+
+```bash
+# Pull cloud memories into the local cache
+npm run local:sync -- --direction pull --limit 500
+
+# Push local memories back to the cloud instance
+npm run local:sync -- --direction push
+```
+
+Customize Capsule Local by creating `capsule-local.config.json` (auto-generated if missing):
+
+```json
+{
+  "serviceName": "Capsule Local",
+  "description": "Offline Capsule cache",
+  "defaultSubjectId": "local-operator",
+  "defaultTags": ["local", "offline"],
+  "manifest": { "version": "1" }
+}
+```
+
+Generate an MCP manifest pointing at the local cache:
+
+```bash
+npm run local:manifest   # writes capsule-local.mcp.json
+```
 
 ### Vector backend controls
 
 Set `CAPSULE_VECTOR_STORE` to `mongo`, `pgvector`, or `qdrant` to toggle candidate selection. The Mongo-backed path remains default; other values log fallbacks until adapters are wired in. Tune the hotset cache with `CAPSULE_HOTSET_SIZE` (entries) and `CAPSULE_HOTSET_TTL` (ms) to balance latency and freshness.
+
+### Adaptive retrieval knobs
+
+- `CAPSULE_REWRITER_URL` / `CAPSULE_REWRITER_KEY` – point the query rewriter at your hosted service (fallback heuristics remain in place).
+- `CAPSULE_RERANKER_URL` / `CAPSULE_RERANKER_KEY` – plug in a learned reranker; when omitted Capsule falls back to recipe-weighted scores.
+- `CAPSULE_REWRITER_TTL` / `CAPSULE_REWRITER_CACHE` – control the rewrite cache TTL and max entries.
+
+Run `npm run eval:retrieval` to benchmark rewrite/rerank impact on a dataset (outputs JSON summary for dashboards).
+
+For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/status.md` for the latest roadmap progress.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
