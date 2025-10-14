@@ -1,4 +1,4 @@
-import { CapsuleStorageState } from './meta';
+import { CapsuleRetention, CapsuleStorageState } from './meta';
 
 export type SearchRecipeName =
   | 'default-semantic'
@@ -11,6 +11,7 @@ export type SearchRecipeScoring = {
   importanceWeight?: number;
   recencyWeight?: number;
   pinnedBoost?: number;
+  retentionBoosts?: Partial<Record<CapsuleRetention, number>>;
 };
 
 export type SearchRecipeFilters = {
@@ -44,7 +45,11 @@ const recipes: Record<SearchRecipeName, SearchRecipe> = {
       semanticWeight: 1,
       importanceWeight: 0.1,
       recencyWeight: 0.05,
-      pinnedBoost: 0.15
+      pinnedBoost: 0.15,
+      retentionBoosts: {
+        irreplaceable: 0.25,
+        permanent: 0.15
+      }
     }
   },
   'conversation-memory': {
@@ -60,7 +65,12 @@ const recipes: Record<SearchRecipeName, SearchRecipe> = {
       semanticWeight: 1,
       importanceWeight: 0.15,
       recencyWeight: 0.3,
-      pinnedBoost: 0.4
+      pinnedBoost: 0.4,
+      retentionBoosts: {
+        irreplaceable: 0.35,
+        permanent: 0.2,
+        replaceable: 0.05
+      }
     }
   },
   'knowledge-qa': {
@@ -80,7 +90,11 @@ const recipes: Record<SearchRecipeName, SearchRecipe> = {
       semanticWeight: 1,
       importanceWeight: 0.2,
       recencyWeight: 0.1,
-      pinnedBoost: 0.1
+      pinnedBoost: 0.1,
+      retentionBoosts: {
+        irreplaceable: 0.2,
+        permanent: 0.1
+      }
     }
   },
   'audit-trace': {
@@ -96,7 +110,10 @@ const recipes: Record<SearchRecipeName, SearchRecipe> = {
       semanticWeight: 1,
       importanceWeight: 0.05,
       recencyWeight: 0.15,
-      pinnedBoost: 0.05
+      pinnedBoost: 0.05,
+      retentionBoosts: {
+        permanent: 0.1
+      }
     }
   }
 };
@@ -134,6 +151,7 @@ export type RecipeContext = {
   pinned: boolean;
   importanceScore?: number;
   recencyScore?: number;
+  retention?: CapsuleRetention;
 };
 
 export function applyRecipeWeight(
@@ -152,6 +170,12 @@ export function applyRecipeWeight(
   }
   if (scoring.pinnedBoost && context.pinned) {
     score += scoring.pinnedBoost;
+  }
+  if (scoring.retentionBoosts && context.retention) {
+    const boost = scoring.retentionBoosts[context.retention];
+    if (typeof boost === 'number') {
+      score += boost;
+    }
   }
   return score;
 }

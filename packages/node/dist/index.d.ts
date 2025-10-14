@@ -25,6 +25,57 @@ export type StorageConfig = {
     graphEnrich?: boolean | null;
     dedupeThreshold?: number | null;
 };
+export type CaptureStatus = "pending" | "approved" | "rejected" | "ignored";
+export type CaptureMemoryOverride = {
+    pinned?: boolean;
+    tags?: string[];
+    retention?: CapsuleRetention | "auto";
+    type?: string;
+    ttlSeconds?: number;
+};
+export type CaptureEventInput = {
+    id?: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    metadata?: Record<string, unknown>;
+    autoAccept?: boolean;
+    memory?: CaptureMemoryOverride | null;
+};
+export type CaptureScoreResult = {
+    eventId?: string;
+    candidateId?: string;
+    status: CaptureStatus;
+    recommended: boolean;
+    score: number;
+    reasons: string[];
+    memoryId?: string | null;
+};
+export type CaptureScoreResponse = {
+    threshold: number;
+    results: CaptureScoreResult[];
+};
+export type CaptureCandidate = {
+    id: string;
+    eventId?: string | null;
+    role: string;
+    content: string;
+    metadata: Record<string, unknown>;
+    score: number;
+    threshold: number;
+    recommended: boolean;
+    category: string;
+    reasons: string[];
+    status: CaptureStatus;
+    autoAccepted: boolean;
+    autoDecisionReason?: string | null;
+    memoryId?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+export type CaptureApprovalResponse = {
+    candidate: CaptureCandidate;
+    memory: unknown;
+};
 export type StoragePolicySummary = {
     name: string;
     description?: string;
@@ -107,6 +158,28 @@ export declare class CapsuleMemoryClient {
     listStoragePolicies(): Promise<{
         policies: StoragePolicySummary[];
     }>;
+    scoreCapture(input: {
+        events: CaptureEventInput[];
+        threshold?: number;
+        subjectId?: string;
+    }): Promise<CaptureScoreResponse>;
+    listCaptureCandidates(input?: {
+        status?: CaptureStatus;
+        limit?: number;
+        subjectId?: string;
+    }): Promise<{
+        items: CaptureCandidate[];
+    }>;
+    approveCaptureCandidate(input: {
+        id: string;
+        memory?: CaptureMemoryOverride | null;
+        subjectId?: string;
+    }): Promise<CaptureApprovalResponse>;
+    rejectCaptureCandidate(input: {
+        id: string;
+        reason?: string;
+        subjectId?: string;
+    }): Promise<CaptureCandidate>;
     updateMemory(input: UpdateMemoryInput): Promise<unknown>;
     deleteMemory(input: DeleteInput): Promise<unknown>;
 }

@@ -3,6 +3,8 @@ import { Module, ObjectId, type RouteDefinition, type RouteParams } from 'modele
 import { z } from 'zod';
 
 import { dbMemories, EMBEDDING_DIMENSIONS } from './db';
+import { dbMemoryCandidates } from './captureDb';
+import type { CaptureStatus } from './captureDb';
 import {
   CapsuleAcl,
   CapsulePiiFlags,
@@ -39,13 +41,21 @@ import {
 } from './recipes';
 import { scheduleGraphJob, startGraphWorker, expandResultsViaGraph } from './graph';
 import { dbGraphEntities, dbGraphJobs } from './graphDb';
-import { logPolicyDecision, logRecipeUsage, logVectorMetrics } from './logging';
+import {
+  logPolicyDecision,
+  logRecipeUsage,
+  logVectorMetrics,
+  logCaptureDecision,
+  logCaptureEvaluation
+} from './logging';
 import { rewriteQuery } from './rewrite';
 import { rerankCandidates } from './rerank';
 import { shouldRewrite, shouldRerank } from './adaptiveConfig';
 import { generateEmbedding } from './voyage';
+import { scoreConversationEvent } from './capture';
 
 type MemoryDocument = typeof dbMemories.Doc;
+type MemoryCandidateDocument = typeof dbMemoryCandidates.Doc;
 
 type TenantScope = {
   orgId: string;
@@ -108,7 +118,28 @@ type MemoryListFilters = {
   retention?: CapsuleRetention;
 };
 
+type CaptureEventInput = {
+  id?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  metadata?: Record<string, unknown> | undefined;
+  autoAccept?: boolean;
+  memory?: CaptureMemoryOverrides | null;
+};
+
+type CaptureMemoryOverrides = {
+  pinned?: boolean;
+  tags?: string[];
+  retention?: CapsuleRetention | 'auto' | null;
+  type?: string;
+  ttlSeconds?: number;
+};
+
+type CaptureMemoryOverrideInput = z.infer<typeof captureMemoryOverridesSchema>;
+type CaptureEventSchemaInput = z.infer<typeof captureEventSchema>;
+
 const MAX_MEMORIES = Number.parseInt(process.env.CAPSULE_MAX_MEMORIES ?? '100', 10);
+const CAPTURE_DEFAULT_THRESHOLD = Number.parseFloat(process.env.CAPSULE_CAPTURE_THRESHOLD ?? '0.6');
 
 const DEFAULT_TENANT: TenantScope = {
   orgId: process.env.CAPSULE_DEFAULT_ORG_ID ?? 'demo-org',
@@ -254,6 +285,46 @@ const listMemoriesSchema = tenantArgSchema.extend({
   retention: retentionSchema.optional()
 });
 
+const captureMemoryOverridesSchema = z
+  .object({
+    pinned: z.boolean().optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    retention: retentionSchema.or(z.literal('auto')).nullish(),
+    type: z.string().min(1).optional(),
+    ttlSeconds: z.number().int().positive().optional()
+  })
+  .nullable()
+  .optional();
+
+const captureEventSchema = z.object({
+  id: z.string().min(1).optional(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  autoAccept: z.boolean().optional(),
+  memory: captureMemoryOverridesSchema
+});
+
+const captureRequestSchema = tenantArgSchema.extend({
+  events: z.array(captureEventSchema).min(1),
+  threshold: z.number().min(0).max(1).optional()
+});
+
+const captureListSchema = tenantArgSchema.extend({
+  status: z.enum(['pending', 'approved', 'rejected', 'ignored']).optional(),
+  limit: z.number().int().positive().max(200).optional()
+});
+
+const captureApproveSchema = tenantArgSchema.extend({
+  id: z.string().min(1),
+  memory: captureMemoryOverridesSchema
+});
+
+const captureRejectSchema = tenantArgSchema.extend({
+  id: z.string().min(1),
+  reason: z.string().max(512).optional()
+});
+
 const searchMemorySchema = tenantArgSchema.extend({
   query: z.string().min(1),
   limit: z.number().int().positive().max(50).optional(),
@@ -356,6 +427,305 @@ function memoryScopeFilter(scope: TenantScope, options?: { includeSubject?: bool
     ...base,
     subjectId: scope.subjectId
   } as const;
+}
+
+function captureScopeFilter(scope: TenantScope, options?: { includeSubject?: boolean }) {
+  const base = {
+    orgId: scope.orgId,
+    projectId: scope.projectId
+  } as const;
+  if (options?.includeSubject === false) {
+    return base;
+  }
+  return {
+    ...base,
+    subjectId: scope.subjectId
+  } as const;
+}
+
+function resolveCaptureThreshold(value?: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1) {
+    return value;
+  }
+  return CAPTURE_DEFAULT_THRESHOLD;
+}
+
+function resolveRetentionOverride(retention?: CapsuleRetention | 'auto' | null): CapsuleRetention | undefined {
+  if (!retention || retention === 'auto') {
+    return undefined;
+  }
+  return retention;
+}
+
+function buildMemoryInputFromCandidate(
+  candidate: { content: string; category: string },
+  overrides?: CaptureMemoryOverrideInput | null
+): CreateMemoryInput {
+  const tags = overrides?.tags ?? null;
+  const retentionOverride = resolveRetentionOverride(overrides?.retention ?? null);
+  const ttlOverride = overrides?.ttlSeconds != null ? overrides.ttlSeconds : undefined;
+  const typeOverride = overrides?.type ?? candidate.category;
+  return {
+    content: candidate.content,
+    pinned: overrides?.pinned ?? false,
+    tags: tags && tags.length > 0 ? tags : undefined,
+    ttlSeconds: ttlOverride,
+    type: typeOverride,
+    retention: retentionOverride
+  };
+}
+
+function toClientCandidate(doc: MemoryCandidateDocument) {
+  return {
+    id: doc._id.toString(),
+    eventId: (doc as { eventId?: string }).eventId ?? null,
+    role: doc.role,
+    content: doc.content,
+    metadata: (doc as { metadata?: Record<string, unknown> }).metadata ?? {},
+    score: doc.score,
+    threshold: doc.threshold,
+    recommended: doc.recommended,
+    category: doc.category,
+    reasons: doc.reasons,
+    status: doc.status,
+    autoAccepted: (doc as { autoAccepted?: boolean }).autoAccepted ?? false,
+    autoDecisionReason: (doc as { autoDecisionReason?: string }).autoDecisionReason ?? null,
+    memoryId: (doc as { memoryId?: string }).memoryId ?? null,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt
+  };
+}
+
+async function scoreCaptureEvents(
+  scope: TenantScope,
+  events: CaptureEventInput[],
+  threshold?: number
+) {
+  const resolvedThreshold = resolveCaptureThreshold(threshold);
+  const outcomes: Array<{
+    eventId?: string;
+    candidateId?: string;
+    status: CaptureStatus;
+    recommended: boolean;
+    score: number;
+    reasons: string[];
+    memoryId?: string | null;
+  }> = [];
+
+  for (const event of events) {
+    const scoring = scoreConversationEvent(
+      {
+        id: event.id,
+        role: event.role,
+        content: event.content,
+        metadata: event.metadata
+      },
+      { threshold: resolvedThreshold }
+    );
+
+    logCaptureEvaluation({
+      scope,
+      eventId: event.id,
+      role: event.role,
+      recommended: scoring.recommended,
+      score: scoring.score,
+      threshold: scoring.threshold,
+      category: scoring.category,
+      reasons: scoring.reasons
+    });
+
+    let status: CaptureStatus = scoring.recommended ? 'pending' : 'ignored';
+    let autoAccepted = false;
+    let autoDecisionReason: string | undefined;
+    let memoryId: string | null = null;
+    const now = new Date();
+
+    if (scoring.recommended && event.autoAccept) {
+      const memoryInput = buildMemoryInputFromCandidate(
+        { content: event.content, category: scoring.category },
+        event.memory ?? null
+      );
+      const created = await createMemory(scope, memoryInput);
+      status = 'approved';
+      autoAccepted = true;
+      autoDecisionReason = 'auto-accepted via capture request';
+      memoryId = created.id;
+    }
+
+    const insertResult = await dbMemoryCandidates.insertOne({
+      orgId: scope.orgId,
+      projectId: scope.projectId,
+      subjectId: scope.subjectId,
+      eventId: event.id,
+      role: event.role,
+      content: event.content,
+      metadata: event.metadata,
+      score: scoring.score,
+      threshold: scoring.threshold,
+      recommended: scoring.recommended,
+      category: scoring.category,
+      reasons: scoring.reasons,
+      status,
+      autoAccepted,
+      autoDecisionReason,
+      memoryId: memoryId ?? undefined,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const candidateId = insertResult.insertedId.toString();
+
+    if (status !== 'pending') {
+      logCaptureDecision({
+        scope,
+        candidateId,
+        status,
+        autoAccepted,
+        memoryId
+      });
+    } else {
+      logCaptureDecision({
+        scope,
+        candidateId,
+        status,
+        autoAccepted: false,
+        memoryId: null
+      });
+    }
+
+    outcomes.push({
+      eventId: event.id,
+      candidateId,
+      status,
+      recommended: scoring.recommended,
+      score: scoring.score,
+      reasons: scoring.reasons,
+      memoryId
+    });
+  }
+
+  return {
+    threshold: resolvedThreshold,
+    results: outcomes
+  };
+}
+
+async function listCaptureCandidates(
+  scope: TenantScope,
+  status: CaptureStatus = 'pending',
+  limit = 50
+) {
+  const documents = await dbMemoryCandidates.fetch(
+    {
+      ...captureScopeFilter(scope),
+      status
+    },
+    {
+      sort: { createdAt: -1 },
+      limit
+    }
+  );
+
+  return documents.map((doc) => toClientCandidate(doc as MemoryCandidateDocument));
+}
+
+async function approveCaptureCandidate(
+  scope: TenantScope,
+  id: string,
+  overrides?: CaptureMemoryOverrideInput | null
+) {
+  const candidate = await dbMemoryCandidates.findOne({
+    _id: toObjectId(id),
+    ...captureScopeFilter(scope)
+  });
+
+  if (!candidate) {
+    throw new Error('Capture candidate not found.');
+  }
+
+  if (candidate.status !== 'pending') {
+    throw new Error(`Cannot approve a candidate with status "${candidate.status}".`);
+  }
+
+  const memoryInput = buildMemoryInputFromCandidate(
+    { content: candidate.content, category: candidate.category },
+    overrides ?? null
+  );
+
+  const created = await createMemory(scope, memoryInput);
+  const updatedAt = new Date();
+
+  await dbMemoryCandidates.updateOne(
+    { _id: candidate._id },
+    {
+      $set: {
+        status: 'approved',
+        memoryId: created.id,
+        updatedAt
+      }
+    }
+  );
+
+  logCaptureDecision({
+    scope,
+    candidateId: candidate._id.toString(),
+    status: 'approved',
+    autoAccepted: false,
+    memoryId: created.id
+  });
+
+  return {
+    candidate: {
+      ...toClientCandidate(candidate as MemoryCandidateDocument),
+      status: 'approved',
+      memoryId: created.id,
+      updatedAt
+    },
+    memory: created
+  };
+}
+
+async function rejectCaptureCandidate(scope: TenantScope, id: string, reason?: string) {
+  const candidate = await dbMemoryCandidates.findOne({
+    _id: toObjectId(id),
+    ...captureScopeFilter(scope)
+  });
+
+  if (!candidate) {
+    throw new Error('Capture candidate not found.');
+  }
+
+  if (candidate.status !== 'pending') {
+    throw new Error(`Cannot reject a candidate with status "${candidate.status}".`);
+  }
+
+  const updatedAt = new Date();
+  await dbMemoryCandidates.updateOne(
+    { _id: candidate._id },
+    {
+      $set: {
+        status: 'rejected',
+        autoDecisionReason: reason,
+        updatedAt
+      }
+    }
+  );
+
+  logCaptureDecision({
+    scope,
+    candidateId: candidate._id.toString(),
+    status: 'rejected',
+    autoAccepted: false,
+    memoryId: null,
+    reason
+  });
+
+  return toClientCandidate({
+    ...candidate,
+    status: 'rejected',
+    autoDecisionReason: reason,
+    updatedAt
+  } as MemoryCandidateDocument);
 }
 
 function computeNorm(vector: number[]): number {
@@ -666,7 +1036,8 @@ async function executeRecipeSearch(
           pinned: doc.pinned,
           importanceScore: doc.importanceScore,
           recencyScore: doc.recencyScore,
-          storage: doc.storage
+          storage: doc.storage,
+          retention: (doc as { retention?: CapsuleRetention }).retention ?? DEFAULT_RETENTION
         },
         recipe.scoring
       );
@@ -1666,6 +2037,81 @@ function withAuth(handler: AuthedRouteHandler) {
 
 const apiRoutes: RouteDefinition[] = [
   {
+    path: '/v1/memories/capture',
+    handlers: {
+      get: withAuth(async (params, scope) => {
+        const query = typeof params.query === 'object' && params.query ? params.query : {};
+        const parsed = captureListSchema.parse({
+          ...query,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const status = parsed.status ?? 'pending';
+        const limit = parsed.limit ?? 50;
+        const items = await listCaptureCandidates(tenant, status, limit);
+        return buildResponse({ items });
+      }),
+      post: withAuth(async (params, scope) => {
+        const body = typeof params.body === 'object' && params.body ? params.body : {};
+        const parsed = captureRequestSchema.parse({
+          ...body,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const events = (parsed.events as CaptureEventSchemaInput[]).map((event) => ({
+          id: event.id,
+          role: event.role,
+          content: event.content,
+          metadata: event.metadata,
+          autoAccept: event.autoAccept,
+          memory: event.memory ?? null
+        }));
+        const summary = await scoreCaptureEvents(tenant, events, parsed.threshold);
+        return buildResponse(summary, 202);
+      })
+    }
+  },
+  {
+    path: '/v1/memories/capture/:id/approve',
+    handlers: {
+      post: withAuth(async (params, scope) => {
+        const body = typeof params.body === 'object' && params.body ? params.body : {};
+        const parsed = captureApproveSchema.parse({
+          ...body,
+          id: params.params.id,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const result = await approveCaptureCandidate(tenant, parsed.id, parsed.memory ?? null);
+        return buildResponse(result, 201);
+      })
+    }
+  },
+  {
+    path: '/v1/memories/capture/:id/reject',
+    handlers: {
+      post: withAuth(async (params, scope) => {
+        const body = typeof params.body === 'object' && params.body ? params.body : {};
+        const parsed = captureRejectSchema.parse({
+          ...body,
+          id: params.params.id,
+          orgId: scope.orgId,
+          projectId: scope.projectId,
+          subjectId: scope.subjectId
+        });
+        const tenant = ensureTenant(parsed, { allowFallback: false });
+        const result = await rejectCaptureCandidate(tenant, parsed.id, parsed.reason);
+        return buildResponse(result);
+      })
+    }
+  },
+  {
     path: '/v1/memories',
     handlers: {
       get: withAuth(async (params, scope) => {
@@ -1916,7 +2362,7 @@ const apiRoutes: RouteDefinition[] = [
 ];
 
 export default new Module('memory', {
-  stores: [dbMemories, dbGraphJobs, dbGraphEntities],
+  stores: [dbMemories, dbGraphJobs, dbGraphEntities, dbMemoryCandidates],
   routes: apiRoutes,
   queries: {
     async getMemories(args) {
@@ -1976,6 +2422,14 @@ export default new Module('memory', {
         policies: listStoragePolicySummaries()
       };
     },
+    async listCaptureCandidates(args) {
+      const parsed = captureListSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      const status = parsed.status ?? 'pending';
+      const limit = parsed.limit ?? 50;
+      const items = await listCaptureCandidates(tenant, status, limit);
+      return { items };
+    },
     previewRecipe(args) {
       const parsed = recipePreviewSchema.parse(args ?? {});
       const tenant = ensureTenant(parsed, { allowFallback: true });
@@ -1994,6 +2448,19 @@ export default new Module('memory', {
     }
   },
   mutations: {
+    async scoreCapture(args) {
+      const parsed = captureRequestSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      const events = (parsed.events as CaptureEventSchemaInput[]).map((event) => ({
+        id: event.id,
+        role: event.role,
+        content: event.content,
+        metadata: event.metadata,
+        autoAccept: event.autoAccept,
+        memory: event.memory ?? null
+      }));
+      return scoreCaptureEvents(tenant, events, parsed.threshold);
+    },
     async addMemory(args) {
       const parsed = createMemorySchema.parse(args ?? {});
 
@@ -2021,6 +2488,16 @@ export default new Module('memory', {
         }
         throw error;
       }
+    },
+    async approveCaptureCandidate(args) {
+      const parsed = captureApproveSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      return approveCaptureCandidate(tenant, parsed.id, parsed.memory ?? null);
+    },
+    async rejectCaptureCandidate(args) {
+      const parsed = captureRejectSchema.parse(args ?? {});
+      const tenant = ensureTenant(parsed, { allowFallback: true });
+      return rejectCaptureCandidate(tenant, parsed.id, parsed.reason);
     },
     async pinMemory(args) {
       const parsed = pinMemorySchema.parse(args ?? {});

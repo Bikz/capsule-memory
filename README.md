@@ -91,6 +91,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 - **Node SDK** – `@capsule-memory/node` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
 - **MCP CLI** – `@capsule-memory/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
 - **Connectors** – configure connector catalog entries in `config/connectors.json`; both the ingest CLI and server reuse the same metadata.
+- **Capture API** – `POST /v1/memories/capture` scores conversation events, queues recommended memories, and auto-approves when requested. Approve or reject queued candidates via `/v1/memories/capture/:id/approve|reject` (also exposed in the SDK).
 
 ## Useful Commands
 | Command        | Description                         |
@@ -121,6 +122,7 @@ Run these commands before sending a PR or deploying changes:
 - `npx tsc --noEmit` – TypeScript structural check for the server, tools, and SDK packages.
 - `npm run lint` – Lint the codebase (run `npm init @eslint/config` first if ESLint isn't configured locally).
 - `npm run eval:retrieval -- --dataset <path>` – Spot-check adaptive retrieval behaviour on a pinned dataset.
+- `npm run eval:capture -- --dataset <path>` – Measure capture precision/recall before adjusting thresholds.
 - `npm run check:pii` – (Requires `MONGO_URL`) ensure no public/shared memories retain PII flags.
 
 ### Backfill existing memories
@@ -282,6 +284,15 @@ Set `CAPSULE_VECTOR_STORE` to `mongo`, `pgvector`, or `qdrant` to toggle candida
 Run `npm run eval:retrieval -- --dataset datasets/sample.json --rewrite --csv results.csv` to benchmark adaptive settings. The evaluator accepts `--rewrite/--no-rewrite` and `--rerank/--no-rerank` overrides (sent via `X-Capsule-Rewrite` / `X-Capsule-Rerank` headers) and emits both JSON summaries (`--output summary.json`) and row-level CSV metrics (`--csv results.csv`).
 
 For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/status.md` for the latest roadmap progress.
+
+### Capture pipeline
+
+- Submit conversation events to `POST /v1/memories/capture` (or `client.scoreCapture`) to receive scores, recommended flags, and queued candidate IDs.
+- Review pending candidates via `GET /v1/memories/capture?status=pending` or `client.listCaptureCandidates`.
+- Approve with optional overrides (pinned/tags/retention/TTL) using `POST /v1/memories/capture/:id/approve` or `client.approveCaptureCandidate`; the server logs both the capture evaluation and final decision (`capsule.capture.*`).
+- Reject via `POST /v1/memories/capture/:id/reject` / `client.rejectCaptureCandidate` to track declined items and reasons.
+- Auto-accept by setting `autoAccept: true` on the capture request; the evaluator will create a memory immediately and log the decision.
+- Tune scoring defaults with `CAPSULE_CAPTURE_THRESHOLD` (fallback `0.6`) or by passing `threshold` on the request.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity

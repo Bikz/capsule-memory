@@ -1,4 +1,5 @@
 import type { CapsuleAcl, CapsuleRetention, CapsuleSource, CapsuleStorageState } from './meta';
+import type { CaptureStatus } from './captureDb';
 import type { SearchRecipe } from './recipes';
 
 const POLICY_LOG_ENABLED = (process.env.CAPSULE_LOG_POLICIES ?? 'true').toLowerCase() !== 'false';
@@ -99,6 +100,50 @@ export function logVectorMetrics(params: {
     latencyMs: params.latencyMs,
     cacheHit: params.cacheHit,
     candidateCount: params.candidateCount
+  };
+
+  console.info(JSON.stringify(payload));
+}
+
+export function logCaptureEvaluation(params: {
+  scope: TenantScopeSummary;
+  eventId?: string;
+  role: string;
+  recommended: boolean;
+  score: number;
+  threshold: number;
+  category: string;
+  reasons: string[];
+}) {
+  const payload = {
+    ...baseEvent('capsule.capture.evaluated', params.scope),
+    eventId: params.eventId ?? null,
+    role: params.role,
+    recommended: params.recommended,
+    score: params.score,
+    threshold: params.threshold,
+    category: params.category,
+    reasons: params.reasons
+  };
+
+  console.info(JSON.stringify(payload));
+}
+
+export function logCaptureDecision(params: {
+  scope: TenantScopeSummary;
+  candidateId: string;
+  status: CaptureStatus;
+  autoAccepted?: boolean;
+  memoryId?: string | null;
+  reason?: string;
+}) {
+  const payload = {
+    ...baseEvent('capsule.capture.decision', params.scope),
+    candidateId: params.candidateId,
+    status: params.status,
+    autoAccepted: params.autoAccepted ?? null,
+    memoryId: params.memoryId ?? null,
+    reason: params.reason ?? null
   };
 
   console.info(JSON.stringify(payload));

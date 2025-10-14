@@ -33,6 +33,64 @@ export type StorageConfig = {
   dedupeThreshold?: number | null;
 };
 
+export type CaptureStatus = "pending" | "approved" | "rejected" | "ignored";
+
+export type CaptureMemoryOverride = {
+  pinned?: boolean;
+  tags?: string[];
+  retention?: CapsuleRetention | "auto";
+  type?: string;
+  ttlSeconds?: number;
+};
+
+export type CaptureEventInput = {
+  id?: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata?: Record<string, unknown>;
+  autoAccept?: boolean;
+  memory?: CaptureMemoryOverride | null;
+};
+
+export type CaptureScoreResult = {
+  eventId?: string;
+  candidateId?: string;
+  status: CaptureStatus;
+  recommended: boolean;
+  score: number;
+  reasons: string[];
+  memoryId?: string | null;
+};
+
+export type CaptureScoreResponse = {
+  threshold: number;
+  results: CaptureScoreResult[];
+};
+
+export type CaptureCandidate = {
+  id: string;
+  eventId?: string | null;
+  role: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  score: number;
+  threshold: number;
+  recommended: boolean;
+  category: string;
+  reasons: string[];
+  status: CaptureStatus;
+  autoAccepted: boolean;
+  autoDecisionReason?: string | null;
+  memoryId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CaptureApprovalResponse = {
+  candidate: CaptureCandidate;
+  memory: unknown;
+};
+
 export type StoragePolicySummary = {
   name: string;
   description?: string;
@@ -226,6 +284,64 @@ export class CapsuleMemoryClient {
 
   async listStoragePolicies(): Promise<{ policies: StoragePolicySummary[] }> {
     return this.request("/v1/memories/policies", { method: "GET" });
+  }
+
+  async scoreCapture(input: {
+    events: CaptureEventInput[];
+    threshold?: number;
+    subjectId?: string;
+  }): Promise<CaptureScoreResponse> {
+    return this.request("/v1/memories/capture", {
+      method: "POST",
+      body: JSON.stringify({
+        events: input.events,
+        threshold: input.threshold
+      }),
+      subjectId: input.subjectId
+    });
+  }
+
+  async listCaptureCandidates(input: {
+    status?: CaptureStatus;
+    limit?: number;
+    subjectId?: string;
+  } = {}): Promise<{ items: CaptureCandidate[] }> {
+    const params = new URLSearchParams();
+    if (input.status) params.set("status", input.status);
+    if (input.limit) params.set("limit", String(input.limit));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/v1/memories/capture${qs}`, {
+      method: "GET",
+      subjectId: input.subjectId
+    });
+  }
+
+  async approveCaptureCandidate(input: {
+    id: string;
+    memory?: CaptureMemoryOverride | null;
+    subjectId?: string;
+  }): Promise<CaptureApprovalResponse> {
+    return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        memory: input.memory ?? undefined
+      }),
+      subjectId: input.subjectId
+    });
+  }
+
+  async rejectCaptureCandidate(input: {
+    id: string;
+    reason?: string;
+    subjectId?: string;
+  }): Promise<CaptureCandidate> {
+    return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason: input.reason
+      }),
+      subjectId: input.subjectId
+    });
   }
 
   async updateMemory(input: UpdateMemoryInput) {

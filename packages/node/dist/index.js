@@ -113,6 +113,46 @@ export class CapsuleMemoryClient {
     async listStoragePolicies() {
         return this.request("/v1/memories/policies", { method: "GET" });
     }
+    async scoreCapture(input) {
+        return this.request("/v1/memories/capture", {
+            method: "POST",
+            body: JSON.stringify({
+                events: input.events,
+                threshold: input.threshold
+            }),
+            subjectId: input.subjectId
+        });
+    }
+    async listCaptureCandidates(input = {}) {
+        const params = new URLSearchParams();
+        if (input.status)
+            params.set("status", input.status);
+        if (input.limit)
+            params.set("limit", String(input.limit));
+        const qs = params.toString() ? `?${params.toString()}` : "";
+        return this.request(`/v1/memories/capture${qs}`, {
+            method: "GET",
+            subjectId: input.subjectId
+        });
+    }
+    async approveCaptureCandidate(input) {
+        return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/approve`, {
+            method: "POST",
+            body: JSON.stringify({
+                memory: input.memory ?? undefined
+            }),
+            subjectId: input.subjectId
+        });
+    }
+    async rejectCaptureCandidate(input) {
+        return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/reject`, {
+            method: "POST",
+            body: JSON.stringify({
+                reason: input.reason
+            }),
+            subjectId: input.subjectId
+        });
+    }
     async updateMemory(input) {
         return this.request(`/v1/memories/${encodeURIComponent(input.id)}`, {
             method: "PATCH",
