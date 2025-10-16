@@ -3,12 +3,12 @@ node_modules
 .pnp
 .pnp.js
 
-# Production
+# Production artifacts
 dist
 build
-!packages/node/dist/
-!packages/node/dist/**
-packages/node/dist/tsconfig.tsbuildinfo
+!packages/sdk-js/dist/
+!packages/sdk-js/dist/**
+packages/sdk-js/dist/tsconfig.tsbuildinfo
 
 # Build cache
 .modelence
@@ -24,6 +24,8 @@ coverage
 .env.production.local
 
 # Logs
+*.log
+.pnpm-debug.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

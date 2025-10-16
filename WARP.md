@@ -17,7 +17,7 @@ Capsule Memory is an AI-ready long-term memory service built with [Modelence](ht
 
 ### Core Components
 
-**Backend (`src/server/`)**:
+**Backend (`packages/core/src/server/`)**:
 - `app.ts` - Main Modelence application entry point that registers the memory module
 - `memory/index.ts` - Core memory module with RPC methods (queries and mutations)
 - `memory/db.ts` - MongoDB store definition with schema and indexes for memory documents
@@ -54,19 +54,16 @@ Memory documents stored in MongoDB contain:
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Start development server (both backend and frontend)
-npm run dev
+pnpm dev
 
-# Build for production
-npm run build
-
-# Start production server
-npm start
+# Build all packages
+pnpm build
 
 # Run MCP bridge (for local agents like Claude Desktop)
-npm run mcp
+pnpm run mcp
 ```
 
 ## Environment Configuration
@@ -82,7 +79,7 @@ Without `VOYAGE_API_KEY`, the system uses a deterministic fallback embedding for
 ## Development Guidelines
 
 ### Working with Memory Module
-- All memory operations go through the Modelence module system in `src/server/memory/index.ts`
+- All memory operations go through the Modelence module system in `packages/core/src/server/memory/index.ts`
 - Queries: `getMemories` (recent/pinned), `searchMemory` (semantic search)
 - Mutations: `addMemory`, `pinMemory`, `deleteMemory`
 - All operations return explanatory messages for transparency
@@ -94,7 +91,7 @@ Without `VOYAGE_API_KEY`, the system uses a deterministic fallback embedding for
 - All server communication uses Modelence's RPC client
 
 ### MCP Integration
-- MCP bridge runs independently via `npm run mcp`
+- MCP bridge runs independently via `pnpm run mcp`
 - Connects to running Modelence server (default: `http://localhost:3000`)
 - Override server URL with `CAPSULE_MEMORY_URL` environment variable
 - Provides structured and text-based responses for agent consumption

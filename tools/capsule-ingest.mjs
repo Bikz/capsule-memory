@@ -48,7 +48,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule Connector Ingest CLI\n\nUsage: npm run ingest -- --connector notion --source path/to/export.json\n       npm run ingest -- --connector google-drive --source ./drive-folder\n\nOptions:\n  --connector, -c   Connector id (${listConnectorIds()})\n  --source, -s      Source file or directory (export JSON for Notion, folder for Drive).\n  --dataset, -d     Optional label recorded with the ingestion job.\n`);
+  console.log(`Capsule Connector Ingest CLI\n\nUsage: pnpm run ingest -- --connector notion --source path/to/export.json\n       pnpm run ingest -- --connector google-drive --source ./drive-folder\n\nOptions:\n  --connector, -c   Connector id (${listConnectorIds()})\n  --source, -s      Source file or directory (export JSON for Notion, folder for Drive).\n  --dataset, -d     Optional label recorded with the ingestion job.\n`);
 }
 
 async function request(method, url, body) {

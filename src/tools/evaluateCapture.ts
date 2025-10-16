@@ -2,7 +2,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { scoreConversationEvent, type CaptureScoreOptions, type ConversationEvent } from '../server/memory/capture';
+import {
+  scoreConversationEvent,
+  type CaptureScoreOptions,
+  type ConversationEvent
+} from '@capsule/core';
 
 type DatasetEntry = ConversationEvent & {
   expected: boolean;
@@ -48,7 +52,7 @@ function parseArgs(argv: string[]): EvalArgs {
 
 function printHelp() {
   console.log(
-    `Capsule Capture Evaluator\n\nUsage: npm run eval:capture -- --dataset datasets/capture-samples.json [--threshold 0.6] [--json] [--csv results.csv]\n`
+    `Capsule Capture Evaluator\n\nUsage: pnpm run eval:capture -- --dataset datasets/capture-samples.json [--threshold 0.6] [--json] [--csv results.csv]\n`
   );
 }
 

@@ -34,7 +34,7 @@ This foundation enables a programmable, privacy-first memory layer.
 - [x] Auto-suggest retention levels during ingest (pinned memories default to irreplaceable) and log overrides for future policy tuning.
 
 ### Retrieval Recipes & Ranking
-- [ ] Publish a curated recipe library (topical focus, recency bias, subject-specific) with configuration docs and regression tests in `npm run eval:retrieval`.
+- [ ] Publish a curated recipe library (topical focus, recency bias, subject-specific) with configuration docs and regression tests in `pnpm run eval:retrieval`.
 - [ ] Incorporate retention metadata into scoring/reranking so “irreplaceable” memories get boosted even when scoring is ambiguous.
 - [ ] Benchmark rewrite/rerank combinations per recipe and promote defaults that balance latency and answer quality.
 

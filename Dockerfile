@@ -5,19 +5,19 @@ WORKDIR /app
 
 # Install dependencies with dev tools for the build stage
 FROM base AS deps
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages ./packages
-RUN npm ci
+RUN corepack enable && pnpm install --frozen-lockfile
 
 # Build the application (Modelence + SDK artifacts)
 FROM deps AS build
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 # Prepare a slim runtime image with only production dependencies
 FROM base AS runner
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 # Copy compiled assets from the build stage
 COPY --from=build /app/.modelence ./ .modelence

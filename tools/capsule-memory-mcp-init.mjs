@@ -11,7 +11,7 @@ const manifestTemplate = {
   entry_point: {
     type: 'stdio',
     command: 'npx',
-    args: ['@capsule-memory/mcp'],
+    args: ['@capsule/mcp'],
     env: {
       CAPSULE_MEMORY_URL: process.env.CAPSULE_MEMORY_URL || 'http://localhost:3000',
       CAPSULE_API_KEY: process.env.CAPSULE_API_KEY || 'demo-key',

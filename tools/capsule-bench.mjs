@@ -37,7 +37,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule Bench CLI\n\nUsage: npm run bench -- [--dataset FILE] [--recipe NAME] [--limit N] [--shadow-url URL]\n\nOptions:\n  --dataset, -d   Path to dataset JSON (default: ${DEFAULT_DATASET}).\n  --recipe, -r    Capsule recipe to evaluate (default: default-semantic).\n  --limit, -l     Top-k to request from Capsule (default: recipe's limit).\n  --shadow-url    Optional competitor endpoint to shadow (expects POST { query }).\n  --output, -o    Write summary JSON to a file.\n`);
+  console.log(`Capsule Bench CLI\n\nUsage: pnpm run bench -- [--dataset FILE] [--recipe NAME] [--limit N] [--shadow-url URL]\n\nOptions:\n  --dataset, -d   Path to dataset JSON (default: ${DEFAULT_DATASET}).\n  --recipe, -r    Capsule recipe to evaluate (default: default-semantic).\n  --limit, -l     Top-k to request from Capsule (default: recipe's limit).\n  --shadow-url    Optional competitor endpoint to shadow (expects POST { query }).\n  --output, -o    Write summary JSON to a file.\n`);
 }
 
 async function loadDataset(filePath) {

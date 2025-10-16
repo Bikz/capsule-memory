@@ -1,0 +1,33 @@
+{
+  "name": "@capsule/adapter-pgvector",
+  "version": "0.0.0",
+  "description": "PostgreSQL pgvector adapter for Capsule Memory",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@capsule/core": "workspace:*"
+  },
+  "dependencies": {
+    "pg": "^8.12.0",
+    "pgvector": "^0.1.7"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  }
+}

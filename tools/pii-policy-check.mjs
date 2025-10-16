@@ -36,7 +36,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule PII Policy Check\n\nUsage:\n  MONGO_URL=mongodb://... npm run check:pii -- [--json] [--limit 100]\n\nFlags:\n  --json        Emit JSON output instead of a console table.\n  --limit, -l   Max flagged memories to print (default 100).\n`);
+  console.log(`Capsule PII Policy Check\n\nUsage:\n  MONGO_URL=mongodb://... pnpm run check:pii -- [--json] [--limit 100]\n\nFlags:\n  --json        Emit JSON output instead of a console table.\n  --limit, -l   Max flagged memories to print (default 100).\n`);
 }
 
 function hasSensitiveFlags(flags) {

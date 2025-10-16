@@ -1,0 +1,202 @@
+"use strict";
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// src/index.ts
+var index_exports = {};
+__export(index_exports, {
+  CapsuleMemoryClient: () => CapsuleMemoryClient
+});
+module.exports = __toCommonJS(index_exports);
+function trimBase(url) {
+  return url.replace(/\/+$/, "");
+}
+var CapsuleMemoryClient = class {
+  #base;
+  #apiKey;
+  #org;
+  #project;
+  #subject;
+  #fetch;
+  constructor(opts) {
+    this.#base = trimBase(opts.baseUrl);
+    this.#apiKey = opts.apiKey;
+    this.#org = opts.orgId;
+    this.#project = opts.projectId;
+    this.#subject = opts.defaultSubjectId;
+    this.#fetch = opts.fetchImpl ?? globalThis.fetch;
+    if (!this.#fetch) {
+      throw new Error("No fetch implementation found. Use Node >=18 or pass fetchImpl.");
+    }
+  }
+  headers(subjectId) {
+    return {
+      "Content-Type": "application/json",
+      "X-Capsule-Key": this.#apiKey,
+      "X-Capsule-Org": this.#org,
+      "X-Capsule-Project": this.#project,
+      "X-Capsule-Subject": subjectId ?? this.#subject
+    };
+  }
+  async request(path, init) {
+    const url = `${this.#base}${path.startsWith("/") ? path : `/${path}`}`;
+    const res = await this.#fetch(url, {
+      method: init?.method ?? "GET",
+      headers: { ...this.headers(init?.subjectId), ...init?.headers },
+      body: init?.body
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const payload = text ? JSON.parse(text) : {};
+    return "data" in payload ? payload.data : payload;
+  }
+  async storeMemory(input) {
+    return this.request("/v1/memories", {
+      method: "POST",
+      body: JSON.stringify({
+        content: input.content,
+        pinned: input.pinned,
+        tags: input.tags,
+        ttlSeconds: input.ttlSeconds,
+        idempotencyKey: input.idempotencyKey,
+        type: input.type,
+        lang: input.lang,
+        importanceScore: input.importanceScore,
+        recencyScore: input.recencyScore,
+        source: input.source,
+        acl: input.acl,
+        piiFlags: input.piiFlags,
+        storage: input.storage,
+        retention: input.retention
+      }),
+      subjectId: input.subjectId
+    });
+  }
+  async listMemories(input = {}) {
+    const params = new URLSearchParams();
+    if (input.limit) params.set("limit", String(input.limit));
+    if (typeof input.pinned === "boolean") params.set("pinned", String(input.pinned));
+    if (input.tag) params.set("tag", input.tag);
+    if (input.type) params.set("type", input.type);
+    if (input.visibility) params.set("visibility", input.visibility);
+    if (input.store) params.set("store", input.store);
+    if (typeof input.graphEnrich === "boolean") params.set("graphEnrich", String(input.graphEnrich));
+    if (input.retention) params.set("retention", input.retention);
+    if (input.subjectId) params.set("subjectId", input.subjectId);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/v1/memories${qs}`, { method: "GET", subjectId: input.subjectId });
+  }
+  async search(input) {
+    const headers = {};
+    if (typeof input.rewrite === "boolean") {
+      headers["X-Capsule-Rewrite"] = String(input.rewrite);
+    }
+    if (typeof input.rerank === "boolean") {
+      headers["X-Capsule-Rerank"] = String(input.rerank);
+    }
+    return this.request("/v1/memories/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: input.query,
+        limit: input.limit,
+        recipe: input.recipe,
+        prompt: input.prompt
+      }),
+      subjectId: input.subjectId,
+      headers
+    });
+  }
+  async listSearchRecipes() {
+    return this.request("/v1/memories/recipes", { method: "GET" });
+  }
+  async listStoragePolicies() {
+    return this.request("/v1/memories/policies", { method: "GET" });
+  }
+  async scoreCapture(input) {
+    return this.request("/v1/memories/capture", {
+      method: "POST",
+      body: JSON.stringify({
+        events: input.events,
+        threshold: input.threshold
+      }),
+      subjectId: input.subjectId
+    });
+  }
+  async listCaptureCandidates(input = {}) {
+    const params = new URLSearchParams();
+    if (input.status) params.set("status", input.status);
+    if (input.limit) params.set("limit", String(input.limit));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/v1/memories/capture${qs}`, {
+      method: "GET",
+      subjectId: input.subjectId
+    });
+  }
+  async approveCaptureCandidate(input) {
+    return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        memory: input.memory ?? void 0
+      }),
+      subjectId: input.subjectId
+    });
+  }
+  async rejectCaptureCandidate(input) {
+    return this.request(`/v1/memories/capture/${encodeURIComponent(input.id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason: input.reason
+      }),
+      subjectId: input.subjectId
+    });
+  }
+  async updateMemory(input) {
+    return this.request(`/v1/memories/${encodeURIComponent(input.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        pinned: input.pinned,
+        tags: input.tags,
+        ttlSeconds: input.ttlSeconds,
+        type: input.type,
+        lang: input.lang,
+        importanceScore: input.importanceScore,
+        recencyScore: input.recencyScore,
+        source: input.source,
+        acl: input.acl,
+        piiFlags: input.piiFlags,
+        storage: input.storage,
+        retention: input.retention
+      }),
+      subjectId: input.subjectId
+    });
+  }
+  async deleteMemory(input) {
+    return this.request(`/v1/memories/${encodeURIComponent(input.id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: input.reason }),
+      subjectId: input.subjectId
+    });
+  }
+};
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  CapsuleMemoryClient
+});
+//# sourceMappingURL=index.cjs.map

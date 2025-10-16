@@ -38,7 +38,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule Local Sync CLI\n\nUsage:\n  npm run local:sync -- --direction pull   # cloud -> local\n  npm run local:sync -- --direction push   # local -> cloud\n\nOptions:\n  --direction, -d  pull (cloud → local) or push (local → cloud). Default: pull.\n  --limit, -l      Max memories to transfer per run (default 200).\n`);
+  console.log(`Capsule Local Sync CLI\n\nUsage:\n  pnpm run local:sync -- --direction pull   # cloud -> local\n  pnpm run local:sync -- --direction push   # local -> cloud\n\nOptions:\n  --direction, -d  pull (cloud → local) or push (local → cloud). Default: pull.\n  --limit, -l      Max memories to transfer per run (default 200).\n`);
 }
 
 async function fetchLocalMemories(limit) {

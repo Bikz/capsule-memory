@@ -1,5 +1,5 @@
 const modelenceConfig = {
-  serverDir: './src/server',
+  serverDir: './packages/core/src/server',
   serverEntry: 'app.ts'
 };
 

@@ -1,11 +1,11 @@
-# @capsule-memory/mcp
+# @capsule/mcp
 
 Model Context Protocol (MCP) tool that exposes Capsule Memory's API to MCP-compatible agents. It wraps the Modelence backend and forwards requests to `/v1/memories` while handling authentication and tenant scoping headers automatically.
 
 ## Usage
 
 ```bash
-npx @capsule-memory/mcp
+npx @capsule/mcp
 ```
 
 The CLI communicates over stdio. Point your MCP client at the generated manifest to gain access to the `capsule-memory.store`, `capsule-memory.search`, `capsule-memory.list`, `capsule-memory.pin`, and `capsule-memory.forget` tools.
@@ -18,4 +18,4 @@ The CLI communicates over stdio. Point your MCP client at the generated manifest
 
 ## Development
 
-The executable entry lives at `src/index.mjs`. The root repository's `npm run mcp` script delegates to this package for backwards compatibility.
+The executable entry lives at `src/index.mjs`. The root repository's `pnpm run mcp` script delegates to this package for backwards compatibility.

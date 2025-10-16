@@ -1,5 +1,5 @@
 {
-  "name": "@capsule-memory/mcp",
+  "name": "@capsule/mcp",
   "version": "0.1.0",
   "type": "module",
   "bin": {

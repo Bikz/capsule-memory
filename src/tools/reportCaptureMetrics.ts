@@ -57,7 +57,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 function printHelp(): void {
-  console.log(`Capsule Capture Metrics\n\nUsage: npm run report:capture -- [--statuses pending,approved] [--limit 200] [--json]\n`);
+  console.log(`Capsule Capture Metrics\n\nUsage: pnpm run report:capture -- [--statuses pending,approved] [--limit 200] [--json]\n`);
 }
 
 async function callApi(path: string): Promise<any> {

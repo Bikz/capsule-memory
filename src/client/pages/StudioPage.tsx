@@ -634,7 +634,7 @@ export default function StudioPage(): JSX.Element {
         <div>
           <h2 className="text-2xl font-semibold text-white">Connector ingestion monitor</h2>
           <p className="text-slate-300">
-            Trigger connector syncs and monitor their status. Use the CLI (`npm run ingest`) for full fetch cycles—
+            Trigger connector syncs and monitor their status. Use the CLI (`pnpm run ingest`) for full fetch cycles—
             each run records a job that appears here for auditing and retries.
           </p>
         </div>

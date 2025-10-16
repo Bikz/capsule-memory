@@ -1,19 +1,23 @@
 {
-  "name": "capsule-memory",
+  "name": "capsule-memory-repo",
   "private": true,
-  "version": "0.1.0",
-  "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=18.17"
+  },
   "scripts": {
     "dev": "modelence dev",
-    "build": "modelence build && npm -w @capsule-memory/node run build",
+    "dev": "modelence dev",
+    "build": "pnpm -r build",
+    "clean": "pnpm -r run clean",
+    "lint": "pnpm -r run lint || true",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test || true",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish",
+    "prepack": "pnpm build",
     "start": "node .modelence/build/app.mjs",
-    "mcp": "node tools/capsule-memory-mcp.mjs",
-    "mcp:manifest": "node tools/capsule-memory-mcp-init.mjs",
-    "lint": "eslint .",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "backfill": "node tools/backfill-metadata.mjs",
     "policies": "node tools/policy-inspector.mjs",
     "router": "node tools/capsule-router.mjs",
@@ -23,34 +27,21 @@
     "local:sync": "node tools/capsule-local-sync.mjs",
     "local:data": "node tools/capsule-local-data.mjs",
     "local:bundle": "node tools/capsule-local-bundle.mjs",
-    "eval:retrieval": "tsx src/tools/evaluateRetrieval.ts",
     "local:manifest": "node tools/capsule-local-manifest.mjs",
-    "check:pii": "node tools/pii-policy-check.mjs",
+    "eval:retrieval": "tsx src/tools/evaluateRetrieval.ts",
     "eval:capture": "tsx src/tools/evaluateCapture.ts",
-    "report:capture": "tsx src/tools/reportCaptureMetrics.ts"
-  },
-  "dependencies": {
-    "@tanstack/react-query": "^5.90.2",
-    "ajv": "^8.17.1",
-    "modelence": "^0.5.6",
-    "mongodb": "^6.20.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-hot-toast": "^2.4.1",
-    "react-router-dom": "^6.22.0",
-    "sqlite3": "^5.1.7",
-    "voyageai": "^0.0.8",
-    "zod": "^4.1.12"
+    "report:capture": "tsx src/tools/reportCaptureMetrics.ts",
+    "check:pii": "node tools/pii-policy-check.mjs",
+    "mcp": "node tools/capsule-memory-mcp.mjs",
+    "mcp:manifest": "node tools/capsule-memory-mcp-init.mjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0",
-    "@types/node": "^20.11.0",
-    "@types/react": "^18.2.48",
-    "@types/react-dom": "^18.2.18",
-    "autoprefixer": "^10.4.17",
-    "eslint": "^8.57.0",
-    "postcss": "^8.4.35",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.5.0"
+    "@types/node": "^22.7.5",
+    "@types/pg": "^8.11.6",
+    "@changesets/cli": "^2.27.7",
+    "eslint": "^9.11.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
   }
 }

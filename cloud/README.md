@@ -22,7 +22,7 @@ either:
 
 1. **Use a submodule** – add this OSS repository as a submodule and keep `cloud/` in the private repo with real
    implementations.
-2. **Import packages** – install the published `@capsule-memory/*` packages and treat this folder as a template for the
+2. **Import packages** – install the published `@capsule/*` packages and treat this folder as a template for the
    proprietary layers.
 
 ## Suggested workflow

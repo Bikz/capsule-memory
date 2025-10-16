@@ -182,7 +182,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`Capsule Local Service
-Usage: npm run local
+Usage: pnpm run local
 Environment:
   CAPSULE_LOCAL_DB   path to SQLite db (default: ${DEFAULT_DB_PATH})
   CAPSULE_LOCAL_PORT port for local API (default: ${DEFAULT_PORT})

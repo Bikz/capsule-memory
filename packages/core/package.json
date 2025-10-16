@@ -1,0 +1,37 @@
+{
+  "name": "@capsule/core",
+  "version": "0.0.0",
+  "description": "Capsule Memory core engine and storage abstractions",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --dts --format esm,cjs --sourcemap",
+    "clean": "rm -rf dist",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "echo \"(no tests yet)\""
+  },
+  "dependencies": {
+    "modelence": "^0.5.6",
+    "voyageai": "^0.0.8",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

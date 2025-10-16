@@ -85,7 +85,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Capsule Local Data CLI\n\nUsage:\n  npm run local:data -- --export backup.json\n  npm run local:data -- --import backup.json\n\nFlags:\n  --export <path>  Write all local memories to the provided JSON file.\n  --import <path>  Load memories from a JSON file (array of records).\n`);
+  console.log(`Capsule Local Data CLI\n\nUsage:\n  pnpm run local:data -- --export backup.json\n  pnpm run local:data -- --import backup.json\n\nFlags:\n  --export <path>  Write all local memories to the provided JSON file.\n  --import <path>  Load memories from a JSON file (array of records).\n`);
 }
 
 async function exportMemories(db, exportPath) {

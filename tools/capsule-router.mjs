@@ -31,7 +31,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   const help = `Capsule Router
-Usage: npm run router -- [--config file] [--init]
+Usage: pnpm run router -- [--config file] [--init]
 
 Options:
   --init            Create a sample ${DEFAULT_CONFIG_FILENAME} in the current directory.

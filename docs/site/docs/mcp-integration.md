@@ -3,12 +3,12 @@ title: MCP Integration
 description: Use Capsule Memory inside MCP-compatible agent runtimes.
 ---
 
-The `@capsule-memory/mcp` package exposes Capsule Memory as an [MCP](https://modelcontextprotocol.io/) tool collection.
+The `@capsule/mcp` package exposes Capsule Memory as an [MCP](https://modelcontextprotocol.io/) tool collection.
 
 ## Installation
 
 ```bash
-npx @capsule-memory/mcp
+npx @capsule/mcp
 ```
 
 The CLI starts an stdio server that advertises the following tools:

@@ -8,13 +8,12 @@ apply basic retention policies that keep the store tidy without losing important
   richer multi-hop answers.
 - **Programmable storage** – route memories via policies to short-term/long-term/graph stores, set TTLs, dedupe thresholds, and
   capture provenance with full ACL enforcement.
-- **Connectors & ingest** – schedule ingestions (Notion, Google Drive) with `npm run ingest`, monitor jobs in Capsule Studio, and
+- **Connectors & ingest** – schedule ingestions (Notion, Google Drive) via the CLI in `tools/capsule-ingest.mjs` (`pnpm exec node tools/capsule-ingest.mjs`), monitor jobs in Capsule Studio, and
   bring third-party knowledge online in minutes.
-- **Capsule Local** – run the SQLite-backed local cache (`npm run local`) for offline development and MCP-first experiences.
+- **Capsule Local** – run the SQLite-backed local cache (`pnpm exec node tools/capsule-local.mjs`) for offline development and MCP-first experiences.
 - **Tooling for operators** – Capsule Studio offers live recipe/policy editors, connector dashboards, and search/policy preview
   tooling; Capsule Bench benchmarks adaptive retrieval against competitors.
-- **Router & MCP quick-start** – `npm run router` proxies memory-enriched prompts to any LLM endpoint; `npm run mcp` exposes the
-  API to MCP-compatible agents.
+- **Router & MCP quick-start** – `pnpm exec node tools/capsule-router.mjs` proxies memory-enriched prompts to any LLM endpoint; the MCP bridge ships as the `@capsule/mcp` package for MCP-compatible agents.
 
 ## Tech Stack
 - **Framework:** TypeScript + Modelence (Express + MongoDB server, React/Vite client)
@@ -39,15 +38,15 @@ apply basic retention policies that keep the store tidy without losing important
    run offline.
 3. **Run the dev server**
    ```bash
-   npm run dev
+   pnpm run dev
    ```
    Open [http://localhost:5173/memory](http://localhost:5173/memory) to try the Capsule Memory UI. The dev command boots both the
    server and Vite client through Modelence.
 
 ## Backend Overview
-The backend lives in `src/server/memory` and is registered through `startApp`.
+The backend lives in `packages/core/src/server/memory` and is registered through `startApp`.
 
-### Data Model (`src/server/memory/db.ts`)
+### Data Model (`packages/core/src/server/memory/db.ts`)
 | Field           | Type            | Description                                      |
 |-----------------|-----------------|--------------------------------------------------|
 | `content`       | `string`        | Raw memory text.                                 |
@@ -57,13 +56,13 @@ The backend lives in `src/server/memory` and is registered through `startApp`.
 | `pinned`        | `boolean`       | Whether the memory is protected from auto-forget.|
 | `explanation`   | `string?`       | Audit note about how the memory was created.     |
 
-### Embedding Helper (`src/server/memory/voyage.ts`)
+### Embedding Helper (`packages/core/src/server/memory/voyage.ts`)
 - Lazily instantiates a `VoyageAIClient` using Modelence configuration or `VOYAGE_API_KEY`.
 - Provides `generateEmbedding(text, inputType)` for both document and query vectors.
 - Implements a deterministic fallback embedding when the API key is missing, ensuring tests and local dev can run without network
   access.
 
-### Module (`src/server/memory/index.ts`)
+### Module (`packages/core/src/server/memory/index.ts`)
 Exposes the following RPC methods via Modelence:
 
 | Method                    | Type      | Description |
@@ -88,34 +87,34 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 
 ## Production API & SDKs
 - **REST API** – Authenticated `/v1` routes expect `X-Capsule-Key`, `X-Capsule-Org`, `X-Capsule-Project`, and `X-Capsule-Subject` headers for multi-tenant scoping.
-- **Node SDK** – `@capsule-memory/node` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
+- **Node SDK** – `@capsule/sdk-js` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
 - **Python SDK** – `packages/python` ships a lightweight `CapsuleMemoryClient` (requests-based) with the same capture helpers.
-- **MCP CLI** – `@capsule-memory/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
+- **MCP CLI** – `@capsule/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
 - **Connectors** – configure connector catalog entries in `config/connectors.json`; both the ingest CLI and server reuse the same metadata.
 - **Capture API** – `POST /v1/memories/capture` scores conversation events, queues recommended memories, and auto-approves when requested. Approve or reject queued candidates via `/v1/memories/capture/:id/approve|reject` (also exposed in the SDK).
 
 ## Useful Commands
 | Command        | Description                         |
 |----------------|-------------------------------------|
-| `npm run dev`  | Start the Modelence dev server.     |
-| `npm run build`| Build the production bundle.        |
-| `npm start`    | Launch the compiled server bundle.  |
-| `npm run mcp`  | Start the Capsule Memory MCP bridge.|
-| `npm run backfill` | Run the metadata backfill for existing memories. |
-| `npm run policies` | Print the current storage policy catalogue. |
-| `npm run router` | Launch the Capsule Router proxy for quick-start integrations. |
-| `npm run bench` | Execute the Capsule Bench CLI (latency/quality benchmarking). |
-| `npm run mcp:manifest` | Scaffold a ready-to-use MCP manifest that points at the Capsule bridge. |
-| `npm run ingest` | Run the connector ingest helper for Notion/Drive exports (uses `config/connectors.json`). |
-| `npm run local` | Start the Capsule Local SQLite cache service for offline use. |
-| `npm run local:sync` | Sync memories between cloud Capsule and Capsule Local (pull/push). |
-| `npm run local:data` | Export or import Capsule Local memories as JSON backups. |
-| `npm run local:bundle` | Build a distributable Capsule Local bundle (config + manifest + scripts). |
-| `npm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
-| `npm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
-| `npm run eval:capture` | Score conversation events and report capture precision/recall metrics. |
-| `npm run report:capture` | Summarise capture queue health (per-status counts/averages). |
-| `npm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
+| `pnpm run dev`  | Start the Modelence dev server.     |
+| `pnpm run build`| Build the production bundle.        |
+| `pnpm run start`    | Launch the compiled server bundle.  |
+| `pnpm run mcp`  | Start the Capsule Memory MCP bridge.|
+| `pnpm run backfill` | Run the metadata backfill for existing memories. |
+| `pnpm run policies` | Print the current storage policy catalogue. |
+| `pnpm run router` | Launch the Capsule Router proxy for quick-start integrations. |
+| `pnpm run bench` | Execute the Capsule Bench CLI (latency/quality benchmarking). |
+| `pnpm run mcp:manifest` | Scaffold a ready-to-use MCP manifest that points at the Capsule bridge. |
+| `pnpm run ingest` | Run the connector ingest helper for Notion/Drive exports (uses `config/connectors.json`). |
+| `pnpm run local` | Start the Capsule Local SQLite cache service for offline use. |
+| `pnpm run local:sync` | Sync memories between cloud Capsule and Capsule Local (pull/push). |
+| `pnpm run local:data` | Export or import Capsule Local memories as JSON backups. |
+| `pnpm run local:bundle` | Build a distributable Capsule Local bundle (config + manifest + scripts). |
+| `pnpm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
+| `pnpm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
+| `pnpm run eval:capture` | Score conversation events and report capture precision/recall metrics. |
+| `pnpm run report:capture` | Summarise capture queue health (per-status counts/averages). |
+| `pnpm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
 
 ## Repository Structure
 
@@ -137,10 +136,10 @@ the open-source core.
 Run these commands before sending a PR or deploying changes:
 
 - `npx tsc --noEmit` – TypeScript structural check for the server, tools, and SDK packages.
-- `npm run lint` – Lint the codebase (run `npm init @eslint/config` first if ESLint isn't configured locally).
-- `npm run eval:retrieval -- --dataset <path>` – Spot-check adaptive retrieval behaviour on a pinned dataset.
-- `npm run eval:capture -- --dataset <path>` – Measure capture precision/recall before adjusting thresholds.
-- `npm run check:pii` – (Requires `MONGO_URL`) ensure no public/shared memories retain PII flags.
+- `pnpm run lint` – Lint the codebase (run `npm init @eslint/config` first if ESLint isn't configured locally).
+- `pnpm run eval:retrieval -- --dataset <path>` – Spot-check adaptive retrieval behaviour on a pinned dataset.
+- `pnpm run eval:capture -- --dataset <path>` – Measure capture precision/recall before adjusting thresholds.
+- `pnpm run check:pii` – (Requires `MONGO_URL`) ensure no public/shared memories retain PII flags.
 
 ### Backfill existing memories
 
@@ -148,8 +147,8 @@ After upgrading to the CapsuleMeta-aware schema, run the backfill once to popula
 `graphEnrich`, provenance, and default scoring fields for previously stored memories:
 
 ```bash
-MONGO_URL="mongodb://…" npm run backfill -- --dry-run   # inspect changes without writing
-MONGO_URL="mongodb://…" npm run backfill                # apply updates in-place
+MONGO_URL="mongodb://…" pnpm run backfill -- --dry-run   # inspect changes without writing
+MONGO_URL="mongodb://…" pnpm run backfill                # apply updates in-place
 ```
 
 Optional flags:
@@ -175,20 +174,20 @@ The script respects `MONGO_DB` if you need to target a specific database within 
   `retention` field, defaulting to auto-selection (pinned ⇒ irreplaceable).
 - **Structured logs**: keep `CAPSULE_LOG_POLICIES` / `CAPSULE_LOG_RECIPES` to their defaults (`true`) to emit structured JSON
   events for storage policy and search recipe usage. Set either to `false` to silence the corresponding logs.
-- **Policy catalogue**: run `npm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
-- **PII compliance checks**: run `npm run check:pii` (requires `MONGO_URL`) to surface any non-private memories that still contain
+- **Policy catalogue**: run `pnpm run policies` (or `--json`) to inspect the active storage policy stack for auditing.
+- **PII compliance checks**: run `pnpm run check:pii` (requires `MONGO_URL`) to surface any non-private memories that still contain
   PII flags or encrypted PII metadata.
 
 ### Capsule Router quick-start
 
 1. Generate a starter config (or copy `capsule-router.config.example.json`):
    ```bash
-   npm run router -- --init
+   pnpm run router -- --init
    ```
 2. Update the file with your Capsule tenant identifiers, API key, recipe, and upstream endpoint.
 3. Launch the proxy:
    ```bash
-   npm run router -- --config capsule-router.config.json
+   pnpm run router -- --config capsule-router.config.json
    ```
 
 POST requests send `{ prompt: "..." }` (plus any extra fields). The router enriches the payload with
@@ -199,17 +198,17 @@ POST requests send `{ prompt: "..." }` (plus any extra fields). The router enric
 Generate a manifest that most MCP hosts (including Claude Desktop) can import:
 
 ```bash
-npm run mcp:manifest  # creates capsule-memory.mcp.json
+pnpm run mcp:manifest  # creates capsule-memory.mcp.json
 ```
 
-Adjust the embedded environment variables if your Capsule server runs elsewhere. Point your MCP client at the manifest and it will execute `npx @capsule-memory/mcp` with the configured env.
+Adjust the embedded environment variables if your Capsule server runs elsewhere. Point your MCP client at the manifest and it will execute `npx @capsule/mcp` with the configured env.
 
 ### Capsule Bench (shadow benchmarking)
 
 - Create a dataset describing the prompts you want to evaluate (see `capsule-bench.dataset.example.json`).
 - Run the CLI:
   ```bash
-  npm run bench -- --dataset my-dataset.json --recipe conversation-memory --shadow-url http://localhost:8080/search
+  pnpm run bench -- --dataset my-dataset.json --recipe conversation-memory --shadow-url http://localhost:8080/search
   ```
 
 The CLI prints latency statistics, optional accuracy hits (if you supply `expected` strings), and per-sample summaries. Use `--output results.json` to persist structured results.
@@ -220,10 +219,10 @@ Use the helper to ingest exports into Capsule Memory while tracking job status:
 
 ```bash
 # Notion JSON export -> Capsule
-npm run ingest -- --connector notion --source notion-export.json --dataset "notion:customer-success"
+pnpm run ingest -- --connector notion --source notion-export.json --dataset "notion:customer-success"
 
 # Google Drive folder of notes -> Capsule
-npm run ingest -- --connector google-drive --source ./drive-notes --dataset "drive:onboarding"
+pnpm run ingest -- --connector google-drive --source ./drive-notes --dataset "drive:onboarding"
 ```
 
 Each run registers a job in `/v1/connectors` which you can monitor in Capsule Studio. Provide API credentials or local exports as needed; the CLI tags memories with the connector id so recipes/policies can target them immediately.
@@ -234,17 +233,17 @@ Each run registers a job in `/v1/connectors` which you can monitor in Capsule St
 Bring Capsule Memory offline via a lightweight SQLite service:
 
 ```bash
-CAPSULE_LOCAL_DB=./capsule-local.db CAPSULE_LOCAL_PORT=5151 npm run local
+CAPSULE_LOCAL_DB=./capsule-local.db CAPSULE_LOCAL_PORT=5151 pnpm run local
 ```
 
 The service exposes `/local/memories` for reads and `/local/status` for health checks. Point the MCP bridge or router at this port when operating fully offline, then sync via connectors or the sync CLI once back online.
 
 ```bash
 # Pull cloud memories into the local cache
-npm run local:sync -- --direction pull --limit 500
+pnpm run local:sync -- --direction pull --limit 500
 
 # Push local memories back to the cloud instance
-npm run local:sync -- --direction push
+pnpm run local:sync -- --direction push
 ```
 
 Customize Capsule Local by creating `capsule-local.config.json` (auto-generated if missing):
@@ -262,7 +261,7 @@ Customize Capsule Local by creating `capsule-local.config.json` (auto-generated 
 Generate an MCP manifest pointing at the local cache:
 
 ```bash
-npm run local:manifest   # writes capsule-local.mcp.json
+pnpm run local:manifest   # writes capsule-local.mcp.json
 ```
 
 ### Export or import Capsule Local data
@@ -270,8 +269,8 @@ npm run local:manifest   # writes capsule-local.mcp.json
 Create JSON backups (or reload them) without running the HTTP service:
 
 ```bash
-npm run local:data -- --export backup.json   # dump all local memories
-npm run local:data -- --import backup.json   # restore from backup
+pnpm run local:data -- --export backup.json   # dump all local memories
+pnpm run local:data -- --import backup.json   # restore from backup
 ```
 
 The JSON format mirrors the SQLite schema (`id`, `content`, `pinned`, `created_at`, `tags`, `metadata`). Entries without an `id` receive a new ULID/UUID during import.
@@ -281,7 +280,7 @@ The JSON format mirrors the SQLite schema (`id`, `content`, `pinned`, `created_a
 Package the local service, config, and manifest into a tarball:
 
 ```bash
-npm run local:bundle
+pnpm run local:bundle
 ```
 
 The script stages assets under `dist/capsule-local-bundle/` and produces `dist/capsule-local-bundle.tar.gz` for sharing with teammates or packaging into an Electron build.
@@ -298,7 +297,7 @@ Set `CAPSULE_VECTOR_STORE` to `mongo`, `pgvector`, or `qdrant` to toggle candida
 - `CAPSULE_REWRITE_ENABLED` / `CAPSULE_RERANK_ENABLED` – force-enable/disable adaptive steps regardless of config defaults.
 - `CAPSULE_REWRITER_TTL` / `CAPSULE_REWRITER_CACHE` – control the rewrite cache TTL and max entries.
 
-Run `npm run eval:retrieval -- --dataset datasets/sample.json --rewrite --csv results.csv` to benchmark adaptive settings. The evaluator accepts `--rewrite/--no-rewrite` and `--rerank/--no-rerank` overrides (sent via `X-Capsule-Rewrite` / `X-Capsule-Rerank` headers) and emits both JSON summaries (`--output summary.json`) and row-level CSV metrics (`--csv results.csv`).
+Run `pnpm run eval:retrieval -- --dataset datasets/sample.json --rewrite --csv results.csv` to benchmark adaptive settings. The evaluator accepts `--rewrite/--no-rewrite` and `--rerank/--no-rerank` overrides (sent via `X-Capsule-Rewrite` / `X-Capsule-Rerank` headers) and emits both JSON summaries (`--output summary.json`) and row-level CSV metrics (`--csv results.csv`).
 
 For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/status.md` for the latest roadmap progress.
 
@@ -310,7 +309,7 @@ For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/statu
 - Reject via `POST /v1/memories/capture/:id/reject` / `client.rejectCaptureCandidate` to track declined items and reasons.
 - Auto-accept by setting `autoAccept: true` on the capture request; the evaluator will create a memory immediately and log the decision.
 - Tune scoring defaults with `CAPSULE_CAPTURE_THRESHOLD` (fallback `0.5`) or by passing `threshold` on the request.
-- Monitor queue health with `npm run report:capture` or the MCP capture tools to spot drift in acceptance rates.
+- Monitor queue health with `pnpm run report:capture` or the MCP capture tools to spot drift in acceptance rates.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
@@ -328,7 +327,7 @@ See [docs/memory-roadmap.md](docs/memory-roadmap.md) for the competitive analysi
 
 ## MCP Bridge (Claude / local agents)
 
-Run `npm run mcp` to expose the Capsule Memory API as an MCP server over stdio. Point your MCP-compatible client (e.g. Claude
+Run `pnpm run mcp` to expose the Capsule Memory API as an MCP server over stdio. Point your MCP-compatible client (e.g. Claude
 Desktop) at the resulting manifest and the agent will gain the following tools:
 
 - `capsule-memory.store` – add/pin new memories

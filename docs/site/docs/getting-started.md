@@ -38,7 +38,7 @@ The Modelence server boots at `http://localhost:3000` with the admin UI availabl
 Use the Node SDK to persist your first item:
 
 ```ts
-import { CapsuleMemoryClient } from '@capsule-memory/node';
+import { CapsuleMemoryClient } from '@capsule/sdk-js';
 
 const client = new CapsuleMemoryClient({
   baseUrl: 'https://api.example.com',
