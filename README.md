@@ -29,7 +29,7 @@ apply basic retention policies that keep the store tidy without losing important
    npm install
    ```
 2. **Configure environment**
-   Create a `.env` or `.modelence.env` file with your MongoDB and Voyage credentials:
+   Copy `.env.example` to `.env` (or `.modelence.env`) and populate it with your MongoDB and Voyage credentials. Keep real secrets in the private Capsule Cloud repo:
    ```bash
    MONGO_URL="mongodb+srv://…"    # required when running against Atlas/Modelence Cloud
    VOYAGE_API_KEY="sk-…"          # optional – enables true Voyage embeddings
@@ -116,6 +116,21 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run eval:capture` | Score conversation events and report capture precision/recall metrics. |
 | `npm run report:capture` | Summarise capture queue health (per-status counts/averages). |
 | `npm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
+
+## Repository Structure
+
+```
+.
+├── src/                    # server + client (Capsule Memory runtime & Studio UI)
+├── packages/               # SDKs (node, python, mcp) and other tooling
+├── tools/                  # CLI scripts, local helpers, evaluation/reporting
+├── docs/                   # public documentation, roadmap, architecture notes
+├── datasets/               # sample capture datasets for evaluators
+└── cloud/                  # scaffolding for private/hosted extensions (see cloud/README.md)
+```
+
+Refer to `cloud/README.md` and `docs/cloud/structure.md` for guidance on layering a private cloud/hosted offering on top of
+the open-source core.
 
 ### Validation checklist
 

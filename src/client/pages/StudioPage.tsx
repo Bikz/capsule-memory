@@ -1,8 +1,18 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { callMethod } from 'modelence/client';
 
 import LoadingSpinner from '@/client/components/LoadingSpinner';
+import logo from '@/client/assets/modelence.svg';
+
+const DOCS_URL = 'https://docs.modelence.com';
+const GITHUB_URL = 'https://github.com/modelence-labs/capsule-memory';
+const STUDIO_HIGHLIGHTS = [
+  'Preview search recipes with your own prompts before rolling to production.',
+  'Inspect, approve, or reject capture candidates with full scoring context.',
+  'Tune storage policies and retention without redeploying services.'
+];
 
 type Tenant = {
   orgId: string;
@@ -841,70 +851,158 @@ export default function StudioPage(): JSX.Element {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-6xl px-6 py-10 space-y-8">
-        <header className="space-y-2">
-          <h1 className="text-4xl font-bold">Capsule Studio</h1>
-          <p className="text-slate-300">
-            Tune search recipes and programmable storage policies with live previews before rolling changes into your router or MCP workflows.
-          </p>
-        </header>
-
-        <div className="flex gap-4 border-b border-slate-800">
-          <button
-            type="button"
-            onClick={() => setActiveTab('recipes')}
-            className={`px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'recipes'
-                ? 'border-b-2 border-indigo-400 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Search recipes
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('policies')}
-            className={`px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'policies'
-                ? 'border-b-2 border-indigo-400 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Storage policies
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('connectors')}
-            className={`px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'connectors'
-                ? 'border-b-2 border-indigo-400 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Connectors & ingest
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('capture')}
-            className={`px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'capture'
-                ? 'border-b-2 border-indigo-400 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Capture review
-          </button>
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <header className="border-b border-slate-800/60 bg-slate-950/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+          <Link to="/" className="flex items-center gap-3">
+            <img src={logo} alt="Capsule Memory" className="h-8 w-8" />
+            <span className="text-lg font-semibold tracking-wide text-slate-100">Capsule Studio</span>
+          </Link>
+          <nav className="flex items-center gap-4 text-sm">
+            <a
+              href={DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg px-3 py-2 text-slate-300 transition hover:bg-slate-900 hover:text-white"
+            >
+              Docs
+            </a>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg px-3 py-2 text-slate-300 transition hover:bg-slate-900 hover:text-white"
+            >
+              GitHub
+            </a>
+            <Link
+              to="/memory"
+              className="inline-flex items-center rounded-lg bg-indigo-500 px-3 py-2 font-semibold text-slate-950 transition hover:bg-indigo-400"
+            >
+              Open Capsule Memory
+            </Link>
+          </nav>
         </div>
+      </header>
 
-        {activeTab === 'recipes'
-          ? renderRecipesTab()
-          : activeTab === 'policies'
-            ? renderPoliciesTab()
-            : activeTab === 'connectors'
-              ? renderConnectorsTab()
-              : renderCaptureTab()}
-      </div>
+      <main className="mx-auto max-w-6xl px-6 py-16 sm:py-20 space-y-12">
+        <section className="grid items-center gap-12 md:grid-cols-[1.1fr,0.9fr]">
+          <div className="space-y-6">
+            <span className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 text-xs uppercase tracking-widest text-slate-400">
+              Control plane
+            </span>
+            <h1 className="text-4xl font-semibold leading-tight text-white sm:text-5xl">
+              Configure, observe, and govern Capsule Memory in one workspace.
+            </h1>
+            <p className="max-w-2xl text-lg text-slate-300">
+              Capsule Studio is your mission control for adaptive retrieval, capture review, and programmable storage policies.
+              Experiment safely, then promote changes to production without interrupting agents or services.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab('capture')}
+                className="inline-flex items-center rounded-lg bg-emerald-500 px-5 py-3 text-base font-semibold text-emerald-950 transition hover:bg-emerald-400"
+              >
+                Review capture queue
+              </button>
+              <Link
+                to="/memory"
+                className="inline-flex items-center rounded-lg border border-slate-700 px-5 py-3 text-base font-semibold text-slate-200 transition hover:border-indigo-500 hover:text-white"
+              >
+                Explore memories
+              </Link>
+            </div>
+            <ul className="space-y-2 text-sm text-slate-400">
+              {STUDIO_HIGHLIGHTS.map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="mt-1 h-2 w-2 rounded-full bg-indigo-400" aria-hidden />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-8 text-sm text-slate-200 shadow-2xl shadow-slate-900/60">
+            <div className="absolute -left-16 -top-16 h-32 w-32 rounded-full bg-indigo-500/30 blur-3xl" aria-hidden />
+            <div className="absolute -bottom-20 -right-10 h-36 w-36 rounded-full bg-purple-500/20 blur-3xl" aria-hidden />
+            <div className="relative space-y-4">
+              <p className="font-mono text-xs uppercase tracking-widest text-indigo-300/80">Live preview</p>
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-4 shadow-lg shadow-slate-900/30">
+                <p className="text-xs text-slate-400">Capture candidate</p>
+                <p className="mt-2 text-sm font-semibold text-white">“Please remind me every Friday morning to send the weekly update.”</p>
+                <p className="mt-3 text-xs text-emerald-300">score 0.75 • recommended</p>
+              </div>
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-4 shadow-lg shadow-slate-900/30">
+                <p className="text-xs text-slate-400">Recipe insight</p>
+                <p className="mt-2 text-sm text-slate-200">semantic + recency blend • pinned boost 0.4 • retention boost (irreplaceable)</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('policies')}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-indigo-500 hover:text-white"
+              >
+                Tune storage policies →
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-6 rounded-3xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-slate-900/40">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">Studio control hub</h2>
+              <p className="text-sm text-slate-300">Switch between recipe previews, storage policies, connectors, and the capture queue.</p>
+            </div>
+            <div className="flex flex-wrap gap-3 text-sm">
+              {[
+                { key: 'recipes', label: 'Search recipes' },
+                { key: 'policies', label: 'Storage policies' },
+                { key: 'connectors', label: 'Connectors & ingest' },
+                { key: 'capture', label: 'Capture review' }
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                  className={`rounded-full px-4 py-2 font-semibold transition ${
+                    activeTab === tab.key
+                      ? 'bg-indigo-500 text-slate-950 shadow shadow-indigo-500/40'
+                      : 'border border-slate-700 text-slate-300 hover:border-indigo-500 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pt-4">
+            {activeTab === 'recipes'
+              ? renderRecipesTab()
+              : activeTab === 'policies'
+                ? renderPoliciesTab()
+                : activeTab === 'connectors'
+                  ? renderConnectorsTab()
+                  : renderCaptureTab()}
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-slate-800/70 bg-slate-950">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>© {new Date().getFullYear()} Capsule Labs. Capsule Studio v1.</span>
+          <div className="flex items-center gap-4">
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="transition hover:text-white">
+              Documentation
+            </a>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="transition hover:text-white">
+              GitHub
+            </a>
+            <Link to="/" className="transition hover:text-white">
+              Marketing site
+            </Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
