@@ -7,8 +7,7 @@
   },
   "scripts": {
     "dev": "modelence dev",
-    "dev": "modelence dev",
-    "build": "pnpm -r build",
+    "build": "pnpm -r build && pnpm exec modelence build",
     "clean": "pnpm -r run clean",
     "lint": "pnpm -r run lint || true",
     "typecheck": "pnpm -r run typecheck",
