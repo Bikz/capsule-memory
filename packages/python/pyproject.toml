@@ -1,0 +1,14 @@
+[project]
+name = "capsule-memory"
+version = "0.1.0"
+description = "Lightweight Capsule Memory client for Python"
+authors = [{ name = "Capsule Labs" }]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

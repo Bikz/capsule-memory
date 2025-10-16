@@ -38,14 +38,33 @@ function summarize(memory) {
   const pinned = memory.pinned ? "📌 " : "";
   const created = memory.createdAt ? new Date(memory.createdAt).toLocaleString() : "unknown";
   const tags = Array.isArray(memory.tags) && memory.tags.length ? `  • tags: ${memory.tags.join(", ")}` : "";
-  return `${pinned}${memory.content}\n  • id: ${memory.id}\n  • created: ${created}${tags}`;
+  const retention = memory.retention ? `  • retention: ${memory.retention}` : "";
+  return `${pinned}${memory.content}\n  • id: ${memory.id}\n  • created: ${created}${tags}${retention}`;
 }
+
+function summarizeCandidate(candidate) {
+  const header = `${candidate.category || candidate.role} • score ${candidate.score.toFixed(2)} / ${candidate.threshold.toFixed(2)} • status ${candidate.status}`;
+  const baseLines = [
+    header,
+    candidate.content,
+    `reasons: ${candidate.reasons.join(" | ")}`,
+    `id=${candidate.id} event=${candidate.eventId ?? "–"} memory=${candidate.memoryId ?? "–"}`,
+    `created=${candidate.createdAt}`
+  ];
+  if (candidate.autoDecisionReason) {
+    baseLines.push(`note: ${candidate.autoDecisionReason}`);
+  }
+  return baseLines.join("\n");
+}
+
+const retentionSchema = z.enum(["irreplaceable", "permanent", "replaceable", "ephemeral"]);
 
 const storeSchema = z.object({
   content: z.string(),
   pinned: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
   ttlSeconds: z.number().int().positive().max(365 * 24 * 3600).optional(),
+  retention: retentionSchema.optional(),
   subjectId: z.string().optional()
 });
 const searchSchema = z.object({
@@ -57,6 +76,7 @@ const listSchema = z.object({
   limit: z.number().int().positive().max(100).optional(),
   pinned: z.boolean().optional(),
   tag: z.string().optional(),
+  retention: retentionSchema.optional(),
   subjectId: z.string().optional()
 });
 const pinSchema = z.object({
@@ -67,6 +87,50 @@ const pinSchema = z.object({
 const forgetSchema = z.object({
   id: z.string(),
   reason: z.string().optional(),
+  subjectId: z.string().optional()
+});
+
+const captureStatusSchema = z.enum(["pending", "approved", "rejected", "ignored"]);
+
+const captureEventSchema = z.object({
+  id: z.string().optional(),
+  role: z.enum(["user", "assistant", "system"]).default("user"),
+  content: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  autoAccept: z.boolean().optional(),
+  memory: z
+    .object({
+      pinned: z.boolean().optional(),
+      tags: z.array(z.string()).optional(),
+      retention: retentionSchema.or(z.literal("auto")).optional(),
+      type: z.string().optional(),
+      ttlSeconds: z.number().int().positive().optional()
+    })
+    .optional()
+    .nullable()
+});
+
+const captureScoreSchema = z.object({
+  events: z.array(captureEventSchema).min(1),
+  threshold: z.number().min(0).max(1).optional(),
+  subjectId: z.string().optional()
+});
+
+const captureListSchema = z.object({
+  status: captureStatusSchema.optional(),
+  limit: z.number().int().positive().max(100).optional(),
+  subjectId: z.string().optional()
+});
+
+const captureApproveSchema = z.object({
+  id: z.string(),
+  memory: captureEventSchema.shape.memory.optional(),
+  subjectId: z.string().optional()
+});
+
+const captureRejectSchema = z.object({
+  id: z.string(),
+  reason: z.string().max(512).optional(),
   subjectId: z.string().optional()
 });
 
@@ -83,7 +147,8 @@ server.registerTool(
         content: input.content,
         pinned: input.pinned,
         tags: input.tags,
-        ttlSeconds: input.ttlSeconds
+        ttlSeconds: input.ttlSeconds,
+        retention: input.retention
       },
       subjectId: input.subjectId
     });
@@ -122,6 +187,7 @@ server.registerTool(
     if (input.limit) params.set("limit", String(input.limit));
     if (typeof input.pinned === "boolean") params.set("pinned", String(input.pinned));
     if (input.tag) params.set("tag", input.tag);
+    if (input.retention) params.set("retention", input.retention);
     if (input.subjectId) params.set("subjectId", input.subjectId);
     const data = await callApi(`/v1/memories?${params.toString()}`, { subjectId: input.subjectId });
     const lines = [data.explanation, ""];
@@ -156,6 +222,92 @@ server.registerTool(
       subjectId: input.subjectId
     });
     return { content: [{ type: "text", text: data.explanation ?? `Memory ${input.id} forgotten.` }] };
+  }
+);
+
+server.registerTool(
+  "capsule-memory.capture-score",
+  {
+    description: "Score conversation events and queue recommended memories.",
+    inputSchema: captureScoreSchema
+  },
+  async (args) => {
+    const input = captureScoreSchema.parse(args);
+    const data = await callApi("/v1/memories/capture", {
+      method: "POST",
+      body: {
+        events: input.events,
+        threshold: input.threshold
+      },
+      subjectId: input.subjectId
+    });
+    const lines = [`threshold: ${data.threshold.toFixed(2)}`];
+    for (const result of data.results) {
+      lines.push(
+        `• ${result.status} — score ${result.score.toFixed(2)} (${result.recommended ? "recommended" : "skipped"})`
+      );
+      lines.push(`  reasons: ${result.reasons.join(" | ")}`);
+      lines.push(`  candidate=${result.candidateId ?? "n/a"} memory=${result.memoryId ?? "n/a"}`);
+    }
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  }
+);
+
+server.registerTool(
+  "capsule-memory.capture-list",
+  {
+    description: "List capture candidates (pending/approved/rejected).",
+    inputSchema: captureListSchema
+  },
+  async (args) => {
+    const input = captureListSchema.parse(args);
+    const params = new URLSearchParams();
+    if (input.status) params.set("status", input.status);
+    if (input.limit) params.set("limit", String(input.limit));
+    if (input.subjectId) params.set("subjectId", input.subjectId);
+    const data = await callApi(`/v1/memories/capture?${params.toString()}`, {
+      subjectId: input.subjectId
+    });
+    const lines = data.items.length
+      ? data.items.map((item) => summarizeCandidate(item)).join("\n\n")
+      : "No capture entries.";
+    return { content: [{ type: "text", text: lines }] };
+  }
+);
+
+server.registerTool(
+  "capsule-memory.capture-approve",
+  {
+    description: "Approve a capture candidate (optionally tweaked retention/tags).",
+    inputSchema: captureApproveSchema
+  },
+  async (args) => {
+    const input = captureApproveSchema.parse(args);
+    const data = await callApi(`/v1/memories/capture/${encodeURIComponent(input.id)}/approve`, {
+      method: "POST",
+      body: { memory: input.memory ?? null },
+      subjectId: input.subjectId
+    });
+    const text = `Approved candidate ${data.candidate.id} → memory ${data.memory.id}`;
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+server.registerTool(
+  "capsule-memory.capture-reject",
+  {
+    description: "Reject a capture candidate.",
+    inputSchema: captureRejectSchema
+  },
+  async (args) => {
+    const input = captureRejectSchema.parse(args);
+    const data = await callApi(`/v1/memories/capture/${encodeURIComponent(input.id)}/reject`, {
+      method: "POST",
+      body: { reason: input.reason },
+      subjectId: input.subjectId
+    });
+    const text = `Rejected candidate ${data.id}`;
+    return { content: [{ type: "text", text }] };
   }
 );
 

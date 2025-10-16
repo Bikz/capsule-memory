@@ -89,6 +89,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 ## Production API & SDKs
 - **REST API** – Authenticated `/v1` routes expect `X-Capsule-Key`, `X-Capsule-Org`, `X-Capsule-Project`, and `X-Capsule-Subject` headers for multi-tenant scoping.
 - **Node SDK** – `@capsule-memory/node` offers a typed client for storing, searching, pinning, and deleting memories programmatically.
+- **Python SDK** – `packages/python` ships a lightweight `CapsuleMemoryClient` (requests-based) with the same capture helpers.
 - **MCP CLI** – `@capsule-memory/mcp` exposes Capsule Memory as a Model Context Protocol toolset for desktop agent hosts.
 - **Connectors** – configure connector catalog entries in `config/connectors.json`; both the ingest CLI and server reuse the same metadata.
 - **Capture API** – `POST /v1/memories/capture` scores conversation events, queues recommended memories, and auto-approves when requested. Approve or reject queued candidates via `/v1/memories/capture/:id/approve|reject` (also exposed in the SDK).
@@ -113,6 +114,7 @@ and returns the removal in the mutation response (`forgottenMemoryId`).
 | `npm run local:manifest` | Generate an MCP manifest pointing at the local cache. |
 | `npm run eval:retrieval` | Evaluate adaptive retrieval results against a dataset. |
 | `npm run eval:capture` | Score conversation events and report capture precision/recall metrics. |
+| `npm run report:capture` | Summarise capture queue health (per-status counts/averages). |
 | `npm run check:pii` | Scan for PII policy violations (shared/public memories containing PII). |
 
 ### Validation checklist
@@ -292,7 +294,8 @@ For deterministic evaluation, prefer the Capsule Bench CLI and check `docs/statu
 - Approve with optional overrides (pinned/tags/retention/TTL) using `POST /v1/memories/capture/:id/approve` or `client.approveCaptureCandidate`; the server logs both the capture evaluation and final decision (`capsule.capture.*`).
 - Reject via `POST /v1/memories/capture/:id/reject` / `client.rejectCaptureCandidate` to track declined items and reasons.
 - Auto-accept by setting `autoAccept: true` on the capture request; the evaluator will create a memory immediately and log the decision.
-- Tune scoring defaults with `CAPSULE_CAPTURE_THRESHOLD` (fallback `0.6`) or by passing `threshold` on the request.
+- Tune scoring defaults with `CAPSULE_CAPTURE_THRESHOLD` (fallback `0.5`) or by passing `threshold` on the request.
+- Monitor queue health with `npm run report:capture` or the MCP capture tools to spot drift in acceptance rates.
 
 ## Next Steps & Ideas
 - Integrate true MongoDB Atlas Vector Search once an Atlas cluster is provisioned (the current scoring runs in Node for simplicity
@@ -316,6 +319,9 @@ Desktop) at the resulting manifest and the agent will gain the following tools:
 - `capsule-memory.store` – add/pin new memories
 - `capsule-memory.search` – semantic lookup
 - `capsule-memory.list` – list the most recent memories
+- `capsule-memory.capture-score` – score raw conversation events and queue recommended memories
+- `capsule-memory.capture-list` – inspect pending/approved/rejected capture candidates
+- `capsule-memory.capture-approve` / `capture-reject` – resolve items in the capture queue without leaving your MCP host
 - `capsule-memory.pin` – toggle pinned status
 - `capsule-memory.forget` – delete a memory with an optional reason
 

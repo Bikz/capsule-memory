@@ -39,9 +39,9 @@ This foundation enables a programmable, privacy-first memory layer.
 - [ ] Benchmark rewrite/rerank combinations per recipe and promote defaults that balance latency and answer quality.
 
 ### Developer Experience & Integrations
-- [ ] Update SDKs (Node complete; Python + MCP next) and MCP tooling to expose new retention metadata and candidate-review endpoints.
+- [x] Update SDKs (Node + Python + MCP capture tooling) to expose retention metadata and candidate-review endpoints.
 - [ ] Document the end-to-end blueprint for connectors/agents: capture conversation events → scorer → review queue → persisted memory.
-- [ ] Add observability hooks (logs + dashboard script) tracking memory creation rate, acceptance rate, and reasons for rejection to close the loop with design partners.
+- [x] Add observability hooks (logs + CLI script) tracking capture acceptance/rejection so design partners can monitor drift.
 
 ## Roadmap Overview (12–16 weeks to parity + differentiation; 6–12 months to moat)
 

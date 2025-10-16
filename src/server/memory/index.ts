@@ -139,7 +139,7 @@ type CaptureMemoryOverrideInput = z.infer<typeof captureMemoryOverridesSchema>;
 type CaptureEventSchemaInput = z.infer<typeof captureEventSchema>;
 
 const MAX_MEMORIES = Number.parseInt(process.env.CAPSULE_MAX_MEMORIES ?? '100', 10);
-const CAPTURE_DEFAULT_THRESHOLD = Number.parseFloat(process.env.CAPSULE_CAPTURE_THRESHOLD ?? '0.6');
+const CAPTURE_DEFAULT_THRESHOLD = Number.parseFloat(process.env.CAPSULE_CAPTURE_THRESHOLD ?? '0.5');
 
 const DEFAULT_TENANT: TenantScope = {
   orgId: process.env.CAPSULE_DEFAULT_ORG_ID ?? 'demo-org',

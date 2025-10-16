@@ -74,6 +74,31 @@ type PolicyPreviewResponse = {
   appliedPolicies: string[];
 };
 
+type CaptureStatus = 'pending' | 'approved' | 'rejected' | 'ignored';
+
+type CaptureCandidate = {
+  id: string;
+  eventId?: string | null;
+  role: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  score: number;
+  threshold: number;
+  recommended: boolean;
+  category: string;
+  reasons: string[];
+  status: CaptureStatus;
+  autoAccepted: boolean;
+  autoDecisionReason?: string | null;
+  memoryId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CaptureListResponse = {
+  items: CaptureCandidate[];
+};
+
 type ConnectorSummary = {
   id: string;
   provider: string;
@@ -122,9 +147,15 @@ function useTenant(): Tenant {
   );
 }
 
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
 export default function StudioPage(): JSX.Element {
   const tenant = useTenant();
-  const [activeTab, setActiveTab] = useState<'recipes' | 'policies' | 'connectors'>('recipes');
+  const [activeTab, setActiveTab] = useState<'recipes' | 'policies' | 'connectors' | 'capture'>('recipes');
+  const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('pending');
+  const [captureActionId, setCaptureActionId] = useState<string | null>(null);
 
   const recipesQuery = useQuery<ListRecipesResponse>({
     queryKey: ['memory.listSearchRecipes'],
@@ -145,6 +176,17 @@ export default function StudioPage(): JSX.Element {
   const connectorJobsQuery = useQuery<ConnectorJobsResponse>({
     queryKey: ['connectors.listJobs'],
     queryFn: () => callMethod('connectors.listJobs', { limit: 50 }),
+    refetchInterval: 10000
+  });
+
+  const captureCandidatesQuery = useQuery<CaptureListResponse>({
+    queryKey: ['memory.listCaptureCandidates', captureStatus],
+    queryFn: () =>
+      callMethod<CaptureListResponse>('memory.listCaptureCandidates', {
+        ...tenant,
+        status: captureStatus,
+        limit: 50
+      }),
     refetchInterval: 10000
   });
 
@@ -197,6 +239,47 @@ export default function StudioPage(): JSX.Element {
       onSuccess: () => {
         connectorJobsQuery.refetch();
         connectorsQuery.refetch();
+      }
+    }
+  );
+
+  const approveCaptureMutation = useMutation<
+    { candidate: CaptureCandidate; memory: unknown },
+    Error,
+    { id: string }
+  >({
+    mutationFn: (variables) =>
+      callMethod('memory.approveCaptureCandidate', {
+        ...tenant,
+        id: variables.id
+      }),
+    onMutate: (variables) => {
+      setCaptureActionId(variables.id);
+    },
+    onSuccess: () => {
+      captureCandidatesQuery.refetch();
+    },
+    onSettled: () => {
+      setCaptureActionId(null);
+    }
+  });
+
+  const rejectCaptureMutation = useMutation<CaptureCandidate, Error, { id: string; reason?: string }>(
+    {
+      mutationFn: (variables) =>
+        callMethod('memory.rejectCaptureCandidate', {
+          ...tenant,
+          id: variables.id,
+          reason: variables.reason
+        }),
+      onMutate: (variables) => {
+        setCaptureActionId(variables.id);
+      },
+      onSuccess: () => {
+        captureCandidatesQuery.refetch();
+      },
+      onSettled: () => {
+        setCaptureActionId(null);
       }
     }
   );
@@ -619,6 +702,144 @@ export default function StudioPage(): JSX.Element {
     );
   };
 
+  const renderCaptureTab = () => {
+    if (captureCandidatesQuery.isLoading) {
+      return (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      );
+    }
+
+    if (captureCandidatesQuery.isError || !captureCandidatesQuery.data) {
+      return <p className="text-red-400">Failed to load capture candidates.</p>;
+    }
+
+    const items = captureCandidatesQuery.data.items ?? [];
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold text-white">Capture review queue</h2>
+            <p className="text-slate-300">
+              Review high-confidence memories extracted from recent conversations. Approve to persist, or reject to
+              suppress noisy events and improve future scoring.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={captureStatus}
+              onChange={(event) => setCaptureStatus(event.target.value as CaptureStatus)}
+              className="rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white focus:border-indigo-400 focus:outline-none"
+            >
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="ignored">Ignored</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => captureCandidatesQuery.refetch()}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition hover:border-indigo-400 hover:text-indigo-200"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {items.map((candidate) => {
+            const pending = candidate.status === 'pending';
+            const acting = captureActionId === candidate.id;
+            const disabled = acting || approveCaptureMutation.isPending || rejectCaptureMutation.isPending;
+            return (
+              <div
+                key={candidate.id}
+                className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg shadow-slate-900/30"
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-wide text-slate-400">
+                      {candidate.category} • {candidate.role}
+                    </p>
+                    <p className="text-lg text-slate-100 whitespace-pre-line">{candidate.content}</p>
+                    {candidate.reasons.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-400">
+                        {candidate.reasons.map((reason, index) => (
+                          <li key={index}>{reason}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <dl className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2 md:grid-cols-4">
+                      <div>
+                        <dt className="font-semibold text-slate-300">Score / threshold</dt>
+                        <dd>{candidate.score.toFixed(2)} / {candidate.threshold.toFixed(2)}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold text-slate-300">Status</dt>
+                        <dd className="capitalize">{candidate.status}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold text-slate-300">Created</dt>
+                        <dd>{formatTimestamp(candidate.createdAt)}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold text-slate-300">Memory</dt>
+                        <dd>{candidate.memoryId ?? '—'}</dd>
+                      </div>
+                    </dl>
+                    {candidate.autoDecisionReason ? (
+                      <p className="mt-2 text-xs text-amber-300">{candidate.autoDecisionReason}</p>
+                    ) : null}
+                    {Object.keys(candidate.metadata ?? {}).length > 0 ? (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                          Metadata
+                        </summary>
+                        <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950/70 p-3 text-xs text-slate-300">
+                          {JSON.stringify(candidate.metadata, null, 2)}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </div>
+                  {pending ? (
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => approveCaptureMutation.mutate({ id: candidate.id })}
+                        disabled={disabled}
+                        className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                      >
+                        {acting && approveCaptureMutation.isPending ? 'Approving…' : 'Approve & store'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const reason = window.prompt('Reason for rejection? (optional)') ?? undefined;
+                          rejectCaptureMutation.mutate({ id: candidate.id, reason: reason || undefined });
+                        }}
+                        disabled={disabled}
+                        className="rounded-lg border border-rose-600 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-600/10 disabled:opacity-60"
+                      >
+                        {acting && rejectCaptureMutation.isPending ? 'Rejecting…' : 'Reject'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {items.length === 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-center text-slate-400">
+              No capture entries for the selected filter.
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto max-w-6xl px-6 py-10 space-y-8">
@@ -663,13 +884,26 @@ export default function StudioPage(): JSX.Element {
           >
             Connectors & ingest
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('capture')}
+            className={`px-4 py-2 text-sm font-semibold transition ${
+              activeTab === 'capture'
+                ? 'border-b-2 border-indigo-400 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Capture review
+          </button>
         </div>
 
         {activeTab === 'recipes'
           ? renderRecipesTab()
           : activeTab === 'policies'
             ? renderPoliciesTab()
-            : renderConnectorsTab()}
+            : activeTab === 'connectors'
+              ? renderConnectorsTab()
+              : renderCaptureTab()}
       </div>
     </div>
   );
